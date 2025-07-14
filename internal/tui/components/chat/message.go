@@ -305,6 +305,10 @@ func renderParams(paramsWidth int, params ...string) string {
 	if len(params) == 0 {
 		return ""
 	}
+	// Ensure minimum width to prevent negative slice bounds
+	if paramsWidth < 4 {
+		paramsWidth = 4
+	}
 	mainParam := params[0]
 	if len(mainParam) > paramsWidth {
 		mainParam = mainParam[:paramsWidth-3] + "..."
@@ -628,7 +632,11 @@ func renderToolMessage(
 		return toolMsg
 	}
 
-	params := renderToolParams(width-2-lipgloss.Width(toolNameText), toolCall)
+	paramWidth := width - 2 - lipgloss.Width(toolNameText)
+	if paramWidth < 0 {
+		paramWidth = 0
+	}
+	params := renderToolParams(paramWidth, toolCall)
 	responseContent := ""
 	if response != nil {
 		responseContent = renderToolResponse(toolCall, *response, width-2)

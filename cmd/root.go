@@ -195,17 +195,21 @@ func attemptTUIRecovery(program *tea.Program) {
 }
 
 func initMCPTools(ctx context.Context, app *app.App) {
+	logging.Debug("initMCPTools: Starting MCP initialization in goroutine")
 	go func() {
 		defer logging.RecoverPanic("MCP-goroutine", nil)
+		logging.Debug("initMCPTools: Inside goroutine, creating timeout context")
 
 		// Create a context with timeout for the initial MCP tools fetch
 		ctxWithTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 
+		logging.Debug("initMCPTools: Calling agent.GetMcpTools with 30s timeout")
 		// Set this up once with proper error handling
 		agent.GetMcpTools(ctxWithTimeout, app.Permissions)
 		logging.Info("MCP message handling goroutine exiting")
 	}()
+	logging.Debug("initMCPTools: Goroutine launched, returning")
 }
 
 func setupSubscriber[T any](

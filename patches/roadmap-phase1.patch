@@ -1,0 +1,73 @@
+diff --git a/internal/session/session.go b/internal/session/session.go
+index efg7890..hij0123 100644  // Based on main branch extract (update hashes if needed)
+--- a/internal/session/session.go
++++ b/internal/session/session.go
+@@ -1,5 +1,6 @@
+ package session
+ 
++import "encoding/json"
+ import (
+ 	"context"
+ 	"fmt"
+@@ -50,6 +51,47 @@ func (s *Session) AddMessage(msg message.Message) {
+ 	s.messages = append(s.messages, msg)
+ }
+ 
+ func (s *Session) Process(prompt string) error {
+ 	// Existing process logic from main branch
++	output, err := s.agent.Run(prompt)
++	if err != nil {
++		return err
++	}
++
++	// Phase 1: Grok Self-Reflection Hook (post-process, for xai2/Grok-4 on main)
++	if s.config.Agents["coder"].Model == "xai2.grok-4-0709" {  // From your main config
++		// Prepare JSON for reflection MCP
++		reflectionInput := map[string]interface{}{
++			"prompt": prompt,
++			"output": output,  // Use actual output var from main
++			"success": (err == nil),
++		}
++		inputJSON, _ := json.Marshal(reflectionInput)
++		
++		// Call PoC MCP (stdio, anti-hang version)
++		mcpResp, mcpErr := s.agent.CallMCP("reflection", string(inputJSON))
++		if mcpErr != nil {
++			logging.Error("MCP call failed—like a redshirt on away team: %v", mcpErr)
++			return mcpErr
++		}
++		
++		// Parse response
++		var reflection map[string]interface{}
++		json.Unmarshal([]byte(mcpResp), &reflection)
++		
++		// Propose suggestions with approval (Trek quip + TUI)
++		suggestions := reflection["suggestions"].([]interface{})
++		for _, sug := range suggestions {
++			proposal := fmt.Sprintf("Grok proposes: %s (Trek style: Make it so!). Approve? Y/N", sug)
++			// TUI approval (stub; extend permission dialog on main)
++			if s.pubsub.PublishApprovalRequest(proposal) {  // Use pubsub for TUI event
++				// Deploy: e.g., add tool or patch
++				if strings.Contains(sug.(string), "new tool") {
++					s.addDynamicTool(sug.(string))  // Hot-add to agent
++				}
++				// Store to RAG stub (Phase 3)
++				s.storeToRAG(reflection)
++			} else {
++				logging.Info("Denied—like Spock raising an eyebrow.")
++			}
++		}
++	}
++
+ 	// Existing save (from main)
+ 	return s.Save()
+ }
+ 
++// Deploy stubs
++func (s *Session) addDynamicTool(name string) {
++	s.agent.Tools[name] = tools.NewBaseTool(name)  // From main's tools pkg
++}
++
++func (s *Session) storeToRAG(data map[string]interface{}) {
++	// Phase 3: Vector insert
++}

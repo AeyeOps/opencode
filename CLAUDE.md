@@ -38,3 +38,15 @@ origin  https://github.com/AeyeOps/opencode.git (push)
 ## Current Status
 
 The repository has uncommitted changes including XAI/Grok integration work and various documentation files.
+
+## Important Development Rules
+
+### DO NOT CREATE NEW VERSIONS OF FILES
+When fixing issues in scripts or code:
+- **EDIT THE EXISTING FILE** - Use Edit tool to fix problems in place
+- **DO NOT CREATE monitor-v2.sh, monitor-fixed.sh, monitor-simple.sh** etc.
+- Multiple versions create confusion and clutter
+- The "old" versions are garbage anyway and just make a mess
+- Fix the original file and move on
+
+This applies to ALL files: scripts, code, configs, etc. One file, one purpose.

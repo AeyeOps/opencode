@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -302,6 +304,57 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 			msgHistory = append(msgHistory, agentMessage, *toolResults)
 			continue
 		}
+
+		// Phase 1: Grok Self-Reflection Hook (post-process, async for non-blocking)
+		if a.provider.Model().ID == "xai2.grok-4-0709" && agentMessage.FinishReason() != message.FinishReasonError {
+			go func() {
+				defer logging.RecoverPanic("reflection", func() {
+					logging.Error("Panic in reflection—like a warp core breach!")
+				})
+
+				// Ultrathink: Build comprehensive input for deep analysis
+				reflectionInput := map[string]interface{}{
+					"sessionID": sessionID,
+					"content": content,
+					"history": msgHistory,  // Full convo for context
+					"output": agentMessage.Content().String(),
+					"success": true,
+				}
+				inputJSON, _ := json.Marshal(reflectionInput)
+
+				// Call PoC MCP (your stub, with timeout)
+				mcpResp, mcpErr := a.CallMCP("reflection", string(inputJSON))
+				if mcpErr != nil {
+					logging.Error(fmt.Sprintf("MCP failed—beam me up: %v", mcpErr))
+					return
+				}
+
+				// Parse response
+				var reflection map[string]interface{}
+				json.Unmarshal([]byte(mcpResp), &reflection)
+
+				// Propose suggestions with approval (Trek quip + logging/TUI stub)
+				suggestions, ok := reflection["suggestions"].([]interface{})
+				if ok {
+					for _, sug := range suggestions {
+						proposal := fmt.Sprintf("Grok ultrathinks: %s (Trek: Engage fixes!). Approve? Y/N", sug)
+						// TODO: Tie to TUI/pubsub for real approval (publish event)
+						logging.Info(proposal)  // Stub; replace with pubsub.Publish("approval", proposal)
+						approved := true  // TODO: Get from user/TUI
+						if approved {
+							if sugStr, ok := sug.(string); ok {
+								a.addDynamicTool(sugStr)  // Deploy example
+							}
+							a.storeToRAG(reflection)  // Phase 3
+							logging.Info("Approved—like Picard saying 'Make it so!'")
+						} else {
+							logging.Info("Denied—like Spock's logic veto.")
+						}
+					}
+				}
+			}()
+		}
+
 		return AgentEvent{
 			Type:    AgentEventTypeResponse,
 			Message: agentMessage,
@@ -376,13 +429,13 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 				if len(toolCall.Name) >= len(toolName)*2 && strings.HasPrefix(toolCall.Name, toolName) {
 					// Check if the call name is the tool name repeated
 					repeated := true
-					for i := 0; i < len(toolCall.Name); i += len(toolName) {
-						if i+len(toolName) > len(toolCall.Name) {
-							if toolCall.Name[i:] != toolName[:len(toolCall.Name)-i] {
+					for k := 0; k < len(toolCall.Name); k += len(toolName) {
+						if k+len(toolName) > len(toolCall.Name) {
+							if toolCall.Name[k:] != toolName[:len(toolCall.Name)-k] {
 								repeated = false
 								break
 							}
-						} else if toolCall.Name[i:i+len(toolName)] != toolName {
+						} else if toolCall.Name[k:k+len(toolName)] != toolName {
 							repeated = false
 							break
 						}
@@ -727,6 +780,26 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 	}()
 
 	return nil
+}
+
+// Deploy stubs
+func (a *agent) addDynamicTool(name string) {
+	// TODO: Implement dynamic tool addition
+	logging.Info("Adding dynamic tool: " + name)
+}
+
+func (a *agent) storeToRAG(data map[string]interface{}) {
+	// Phase 3: Vector insert
+	// TODO: implement
+}
+
+func (a *agent) CallMCP(kind string, input string) (string, error) {
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("echo '%s' | timeout 10s python3 /opt/aeo/opencode/mcps/reflection_mcp.py", input))
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(output), nil
 }
 
 func createAgentProvider(agentName config.AgentName) (provider.Provider, error) {

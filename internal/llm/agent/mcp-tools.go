@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/opencode-ai/opencode/internal/config"
 	"github.com/opencode-ai/opencode/internal/llm/tools"
@@ -140,6 +141,7 @@ func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, mcpC
 var mcpTools []tools.BaseTool
 
 func getTools(ctx context.Context, name string, m config.MCPServer, permissions permission.Service, c MCPClient) []tools.BaseTool {
+	logging.Debug("getTools: Starting for MCP server", "name", name)
 	var stdioTools []tools.BaseTool
 	initRequest := mcp.InitializeRequest{}
 	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
@@ -148,52 +150,85 @@ func getTools(ctx context.Context, name string, m config.MCPServer, permissions 
 		Version: version.Version,
 	}
 
-	_, err := c.Initialize(ctx, initRequest)
+	logging.Debug("getTools: Initializing MCP client", "name", name, "protocolVersion", initRequest.Params.ProtocolVersion)
+	logging.Debug("getTools: Sending initialize request", "name", name, "clientInfo", initRequest.Params.ClientInfo)
+	
+	// Add timeout for initialization
+	initCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	
+	initResult, err := c.Initialize(initCtx, initRequest)
 	if err != nil {
-		logging.Error("error initializing mcp client", "error", err)
+		logging.Error("error initializing mcp client", "name", name, "error", err, "contextErr", initCtx.Err())
 		return stdioTools
 	}
+	logging.Debug("getTools: MCP client initialized successfully", "name", name, "serverInfo", initResult.ServerInfo, "capabilities", initResult.Capabilities)
+	
 	toolsRequest := mcp.ListToolsRequest{}
+	logging.Debug("getTools: Listing tools from MCP server", "name", name)
 	tools, err := c.ListTools(ctx, toolsRequest)
 	if err != nil {
-		logging.Error("error listing tools", "error", err)
+		logging.Error("error listing tools", "name", name, "error", err)
 		return stdioTools
 	}
+	logging.Debug("getTools: Retrieved tool list", "name", name, "count", len(tools.Tools))
+	
 	for _, t := range tools.Tools {
+		logging.Debug("getTools: Adding tool", "name", name, "toolName", t.Name)
 		stdioTools = append(stdioTools, NewMcpTool(name, t, permissions, m))
 	}
 	defer c.Close()
+	logging.Debug("getTools: Completed", "name", name, "totalTools", len(stdioTools))
 	return stdioTools
 }
 
 func GetMcpTools(ctx context.Context, permissions permission.Service) []tools.BaseTool {
+	logging.Debug("GetMcpTools: Starting MCP tools initialization")
 	if len(mcpTools) > 0 {
+		logging.Debug("GetMcpTools: Returning cached MCP tools", "count", len(mcpTools))
 		return mcpTools
 	}
-	for name, m := range config.Get().MCPServers {
+	
+	mcpServers := config.Get().MCPServers
+	logging.Debug("GetMcpTools: Found MCP servers", "count", len(mcpServers))
+	
+	for name, m := range mcpServers {
+		logging.Debug("GetMcpTools: Processing MCP server", "name", name, "type", m.Type, "command", m.Command, "args", m.Args)
 		switch m.Type {
 		case config.MCPStdio:
+			logging.Debug("GetMcpTools: Creating stdio MCP client", "name", name, "command", m.Command, "args", m.Args, "env", m.Env)
+			
+			// Log the full command that will be executed
+			logging.Debug("GetMcpTools: Executing command", "name", name, "fullCommand", fmt.Sprintf("%s %v", m.Command, m.Args))
+			
 			c, err := client.NewStdioMCPClient(
 				m.Command,
 				m.Env,
 				m.Args...,
 			)
 			if err != nil {
-				logging.Error("error creating mcp client", "error", err)
+				logging.Error("error creating mcp client", "name", name, "error", err, "command", m.Command, "args", m.Args)
 				continue
 			}
+			logging.Debug("GetMcpTools: Stdio client created successfully", "name", name)
 
-			mcpTools = append(mcpTools, getTools(ctx, name, m, permissions, c)...)
+			tools := getTools(ctx, name, m, permissions, c)
+			logging.Debug("GetMcpTools: Retrieved tools from MCP server", "name", name, "toolCount", len(tools))
+			mcpTools = append(mcpTools, tools...)
 		case config.MCPSse:
+			logging.Debug("GetMcpTools: Creating SSE MCP client", "name", name, "url", m.URL)
 			c, err := client.NewSSEMCPClient(
 				m.URL,
 				client.WithHeaders(m.Headers),
 			)
 			if err != nil {
-				logging.Error("error creating mcp client", "error", err)
+				logging.Error("error creating mcp client", "name", name, "error", err)
 				continue
 			}
-			mcpTools = append(mcpTools, getTools(ctx, name, m, permissions, c)...)
+			logging.Debug("GetMcpTools: SSE client created successfully", "name", name)
+			tools := getTools(ctx, name, m, permissions, c)
+			logging.Debug("GetMcpTools: Retrieved tools from MCP server", "name", name, "toolCount", len(tools))
+			mcpTools = append(mcpTools, tools...)
 		}
 	}
 

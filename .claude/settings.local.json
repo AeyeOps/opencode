@@ -3,7 +3,12 @@
     "allow": [
       "Bash(git remote set-url origin https://github.com/AeyeOps/opencode.git)",
       "Bash(go:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(gh pr:*)",
+      "Bash(git checkout:*)",
+      "Bash(rm:*)",
+      "Bash(git apply:*)",
+      "Bash(npx:*)"
     ],
     "deny": []
   }

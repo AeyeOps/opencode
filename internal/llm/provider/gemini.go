@@ -14,6 +14,7 @@ import (
 	"github.com/opencode-ai/opencode/internal/llm/tools"
 	"github.com/opencode-ai/opencode/internal/logging"
 	"github.com/opencode-ai/opencode/internal/message"
+	"github.com/opencode-ai/opencode/internal/request"
 	"google.golang.org/genai"
 )
 
@@ -166,6 +167,9 @@ func (g *geminiClient) finishReason(reason genai.FinishReason) message.FinishRea
 }
 
 func (g *geminiClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error) {
+	// Set current request info for display
+	request.SetCurrent(string(g.providerOptions.model.Provider), g.providerOptions.model.APIModel, "https://generativelanguage.googleapis.com")
+	
 	// Convert messages
 	geminiMessages := g.convertMessages(messages)
 
@@ -202,17 +206,20 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 		if err != nil {
 			retry, after, retryErr := g.shouldRetry(attempts, err)
 			if retryErr != nil {
+				request.Clear() // Clear request info on error
 				return nil, retryErr
 			}
 			if retry {
 				logging.WarnPersist(fmt.Sprintf("Retrying due to rate limit... attempt %d of %d", attempts, maxRetries), logging.PersistTimeArg, time.Millisecond*time.Duration(after+100))
 				select {
 				case <-ctx.Done():
+					request.Clear() // Clear request info on context cancellation
 					return nil, ctx.Err()
 				case <-time.After(time.Duration(after) * time.Millisecond):
 					continue
 				}
 			}
+			request.Clear() // Clear request info on error
 			return nil, retryErr
 		}
 
@@ -244,6 +251,7 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 			finishReason = message.FinishReasonToolUse
 		}
 
+		request.Clear() // Clear request info on successful completion
 		return &ProviderResponse{
 			Content:      content,
 			ToolCalls:    toolCalls,
@@ -254,6 +262,9 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 }
 
 func (g *geminiClient) stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
+	// Set current request info for display
+	request.SetCurrent(string(g.providerOptions.model.Provider), g.providerOptions.model.APIModel, "https://generativelanguage.googleapis.com")
+	
 	// Convert messages
 	geminiMessages := g.convertMessages(messages)
 
@@ -300,6 +311,7 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 				if err != nil {
 					retry, after, retryErr := g.shouldRetry(attempts, err)
 					if retryErr != nil {
+						request.Clear() // Clear request info on error
 						eventChan <- ProviderEvent{Type: EventError, Error: retryErr}
 						return
 					}
@@ -307,6 +319,7 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 						logging.WarnPersist(fmt.Sprintf("Retrying due to rate limit... attempt %d of %d", attempts, maxRetries), logging.PersistTimeArg, time.Millisecond*time.Duration(after+100))
 						select {
 						case <-ctx.Done():
+							request.Clear() // Clear request info on context cancellation
 							if ctx.Err() != nil {
 								eventChan <- ProviderEvent{Type: EventError, Error: ctx.Err()}
 							}
@@ -316,6 +329,7 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 							break
 						}
 					} else {
+						request.Clear() // Clear request info on error
 						eventChan <- ProviderEvent{Type: EventError, Error: err}
 						return
 					}
@@ -382,6 +396,7 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 						FinishReason: finishReason,
 					},
 				}
+				request.Clear() // Clear request info on successful completion
 				return
 			}
 

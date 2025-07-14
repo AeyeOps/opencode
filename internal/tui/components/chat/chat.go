@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/opencode-ai/opencode/internal/config"
 	"github.com/opencode-ai/opencode/internal/message"
+	"github.com/opencode-ai/opencode/internal/request"
 	"github.com/opencode-ai/opencode/internal/session"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/theme"
@@ -33,6 +34,47 @@ func header(width int) string {
 		"",
 		cwd(width),
 	)
+}
+
+func requestInfo(width int) string {
+	t := theme.CurrentTheme()
+	baseStyle := styles.BaseStyle()
+	
+	// Get current request info
+	reqInfo := request.GetCurrent()
+	
+	if reqInfo.Provider == "" {
+		return ""
+	}
+	
+	// Title
+	title := "Current Request"
+	title = ansi.Truncate(title, width, "…")
+	
+	titleView := baseStyle.
+		Width(width).
+		Foreground(t.Primary()).
+		Bold(true).
+		Render(title)
+	
+	// Format the request info
+	info := fmt.Sprintf("• %s → %s", reqInfo.Model, reqInfo.URL)
+	info = ansi.Truncate(info, width-2, "…")
+	
+	infoView := baseStyle.
+		Width(width).
+		Foreground(t.Text()).
+		Render(info)
+	
+	return baseStyle.
+		Width(width).
+		Render(
+			lipgloss.JoinVertical(
+				lipgloss.Left,
+				titleView,
+				infoView,
+			),
+		)
 }
 
 func lspsConfigured(width int) string {

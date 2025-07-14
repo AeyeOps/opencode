@@ -88,6 +88,9 @@ func NewProvider(providerName models.ModelProvider, opts ...ProviderClientOption
 	for _, o := range opts {
 		o(&clientOptions)
 	}
+	
+	// Log provider creation attempt
+	
 	switch providerName {
 	case models.ProviderCopilot:
 		return &baseProvider[CopilotClient]{
@@ -145,13 +148,17 @@ func NewProvider(providerName models.ModelProvider, opts ...ProviderClientOption
 			client:  newOpenAIClient(clientOptions),
 		}, nil
 	case models.ProviderXAI:
-		clientOptions.openaiOptions = append(clientOptions.openaiOptions,
-			WithOpenAIBaseURL("https://api.x.ai/v1"),
-		)
-		return &baseProvider[OpenAIClient]{
+		return &baseProvider[XAIClient]{
 			options: clientOptions,
-			client:  newOpenAIClient(clientOptions),
+			client:  newXAIClient(clientOptions),
 		}, nil
+	case models.ProviderXAI2:
+		// Use the new standalone xAI provider
+		client, err := NewXAI2Client(clientOptions.apiKey, clientOptions)
+		if err != nil {
+			return nil, err
+		}
+		return client, nil
 	case models.ProviderLocal:
 		clientOptions.openaiOptions = append(clientOptions.openaiOptions,
 			WithOpenAIBaseURL(os.Getenv("LOCAL_ENDPOINT")),

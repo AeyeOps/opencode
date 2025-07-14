@@ -1,0 +1,55 @@
+{
+  "output": {
+    "filePath": "repomix-output.xml",
+    "style": "xml",
+    "removeComments": true,
+    "removeEmptyLines": true,
+    "topFilesLength": 10,
+    "showLineNumbers": false,
+    "copyToClipboard": false,
+    "compress": true
+  },
+  "include": [
+    "**/*.go",
+    "**/*.md",
+    "go.mod",
+    "go.sum",
+    "Makefile",
+    ".goreleaser.yaml",
+    "**/*.json",
+    "**/*.yaml",
+    "**/*.yml",
+    "**/*.sh"
+  ],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      "**/vendor/**",
+      "**/node_modules/**",
+      "**/.git/**",
+      "**/dist/**",
+      "**/build/**",
+      "**/*.log",
+      "**/*.db",
+      "**/*.db-*",
+      "**/tmp/**",
+      "**/.opencode/**",
+      "**/testdata/**",
+      "**/mocks/**",
+      "**/*_test.go",
+      "**/docs/api/**",
+      "**/*.png",
+      "**/*.jpg",
+      "**/*.gif",
+      "**/*.ico",
+      "**/*.svg",
+      "**/internal/llm/provider/xai.go.bak",
+      "**/kb/**",
+      "**/*.patch"
+    ]
+  },
+  "security": {
+    "enableSecurityCheck": true
+  }
+}

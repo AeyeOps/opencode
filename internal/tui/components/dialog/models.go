@@ -126,8 +126,13 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.switchProvider(1)
 			}
 		case key.Matches(msg, modelKeys.Enter):
-			util.ReportInfo(fmt.Sprintf("selected model: %s", m.models[m.selectedIdx].Name))
-			return m, util.CmdHandler(ModelSelectedMsg{Model: m.models[m.selectedIdx]})
+			if len(m.models) == 0 {
+				return m, nil
+			}
+			selectedModel := m.models[m.selectedIdx]
+			util.ReportInfo(fmt.Sprintf("selected model: %s (ID: %s, Provider: %s)", selectedModel.Name, selectedModel.ID, selectedModel.Provider))
+			// Model selected: selectedModel.Name
+			return m, util.CmdHandler(ModelSelectedMsg{Model: selectedModel})
 		case key.Matches(msg, modelKeys.Escape):
 			return m, util.CmdHandler(CloseModelDialogMsg{})
 		}
@@ -289,6 +294,7 @@ func GetSelectedModel(cfg *config.Config) models.Model {
 
 func getEnabledProviders(cfg *config.Config) []models.ModelProvider {
 	var providers []models.ModelProvider
+	// Check available providers
 	for providerId, provider := range cfg.Providers {
 		if !provider.Disabled {
 			providers = append(providers, providerId)

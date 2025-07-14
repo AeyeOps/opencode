@@ -89,12 +89,36 @@ func (m *messagesCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		if key.Matches(msg, messageKeys.PageUp) || key.Matches(msg, messageKeys.PageDown) ||
-			key.Matches(msg, messageKeys.HalfPageUp) || key.Matches(msg, messageKeys.HalfPageDown) {
+		// Handle half-page scrolling with custom smaller amount
+		if key.Matches(msg, messageKeys.HalfPageUp) {
+			// Scroll up by 3 lines instead of half page
+			m.viewport.LineUp(3)
+			return m, nil
+		} else if key.Matches(msg, messageKeys.HalfPageDown) {
+			// Scroll down by 3 lines instead of half page
+			m.viewport.LineDown(3)
+			return m, nil
+		} else if key.Matches(msg, messageKeys.PageUp) || key.Matches(msg, messageKeys.PageDown) {
+			// Let viewport handle full page scrolling normally
 			u, cmd := m.viewport.Update(msg)
 			m.viewport = u
 			cmds = append(cmds, cmd)
 		}
+	
+	case tea.MouseMsg:
+		// Only handle wheel events, let click/drag pass through for text selection
+		switch msg.Action {
+		case tea.MouseActionPress:
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.viewport.LineUp(1)
+				return m, nil
+			case tea.MouseButtonWheelDown:
+				m.viewport.LineDown(1)
+				return m, nil
+			}
+		}
+		// Don't consume other mouse events - let them bubble up for text selection
 
 	case renderFinishedMsg:
 		m.rendering = false
@@ -403,12 +427,21 @@ func (m *messagesCmp) help() string {
 func (m *messagesCmp) initialScreen() string {
 	baseStyle := styles.BaseStyle()
 
+	sections := []string{
+		header(m.width),
+		"",
+		lspsConfigured(m.width),
+	}
+	
+	// Add request info if available
+	if reqInfo := requestInfo(m.width); reqInfo != "" {
+		sections = append(sections, "", reqInfo)
+	}
+
 	return baseStyle.Width(m.width).Render(
 		lipgloss.JoinVertical(
 			lipgloss.Top,
-			header(m.width),
-			"",
-			lspsConfigured(m.width),
+			sections...,
 		),
 	)
 }
@@ -477,6 +510,8 @@ func NewMessagesCmp(app *app.App) tea.Model {
 	vp.KeyMap.PageDown = messageKeys.PageDown
 	vp.KeyMap.HalfPageUp = messageKeys.HalfPageUp
 	vp.KeyMap.HalfPageDown = messageKeys.HalfPageDown
+	vp.MouseWheelEnabled = true  // Enable mouse wheel scrolling
+	vp.MouseWheelDelta = 1       // Scroll 1 line at a time for natural feel
 	return &messagesCmp{
 		app:           app,
 		cachedContent: make(map[string]cacheItem),

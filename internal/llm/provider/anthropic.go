@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	toolsPkg "github.com/opencode-ai/opencode/internal/llm/tools"
 	"github.com/opencode-ai/opencode/internal/logging"
 	"github.com/opencode-ai/opencode/internal/message"
+	"github.com/opencode-ai/opencode/internal/request"
 )
 
 type anthropicOptions struct {
@@ -196,11 +199,21 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 }
 
 func (a *anthropicClient) send(ctx context.Context, messages []message.Message, tools []toolsPkg.BaseTool) (resposne *ProviderResponse, err error) {
+	// Set current request info for display
+	baseURL := "https://api.anthropic.com"
+	if a.options.useBedrock {
+		baseURL = "AWS Bedrock"
+	}
+	request.SetCurrent(string(a.providerOptions.model.Provider), a.providerOptions.model.APIModel, baseURL)
+	
 	preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
 	cfg := config.Get()
 	if cfg.Debug {
 		jsonData, _ := json.Marshal(preparedMessages)
 		logging.Debug("Prepared messages", "messages", string(jsonData))
+		
+		// Log request info to file
+		a.logRequest()
 	}
 
 	attempts := 0
@@ -215,17 +228,20 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 			logging.Error("Error in Anthropic API call", "error", err)
 			retry, after, retryErr := a.shouldRetry(attempts, err)
 			if retryErr != nil {
+				request.Clear() // Clear request info on error
 				return nil, retryErr
 			}
 			if retry {
 				logging.WarnPersist(fmt.Sprintf("Retrying due to rate limit... attempt %d of %d", attempts, maxRetries), logging.PersistTimeArg, time.Millisecond*time.Duration(after+100))
 				select {
 				case <-ctx.Done():
+					request.Clear() // Clear request info on context cancellation
 					return nil, ctx.Err()
 				case <-time.After(time.Duration(after) * time.Millisecond):
 					continue
 				}
 			}
+			request.Clear() // Clear request info on error
 			return nil, retryErr
 		}
 
@@ -236,6 +252,7 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 			}
 		}
 
+		request.Clear() // Clear request info on successful completion
 		return &ProviderResponse{
 			Content:   content,
 			ToolCalls: a.toolCalls(*anthropicResponse),
@@ -245,6 +262,13 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 }
 
 func (a *anthropicClient) stream(ctx context.Context, messages []message.Message, tools []toolsPkg.BaseTool) <-chan ProviderEvent {
+	// Set current request info for display
+	baseURL := "https://api.anthropic.com"
+	if a.options.useBedrock {
+		baseURL = "AWS Bedrock"
+	}
+	request.SetCurrent(string(a.providerOptions.model.Provider), a.providerOptions.model.APIModel, baseURL)
+	
 	preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
 	cfg := config.Get()
 
@@ -255,6 +279,10 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 			sessionId = sid
 		}
 		jsonData, _ := json.Marshal(preparedMessages)
+		
+		// Log request info to file
+		a.logRequest()
+		
 		if sessionId != "" {
 			filepath := logging.WriteRequestMessageJson(sessionId, requestSeqId, preparedMessages)
 			logging.Debug("Prepared messages", "filepath", filepath)
@@ -357,12 +385,14 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 
 			err := anthropicStream.Err()
 			if err == nil || errors.Is(err, io.EOF) {
+				request.Clear() // Clear request info on successful completion
 				close(eventChan)
 				return
 			}
 			// If there is an error we are going to see if we can retry the call
 			retry, after, retryErr := a.shouldRetry(attempts, err)
 			if retryErr != nil {
+				request.Clear() // Clear request info on error
 				eventChan <- ProviderEvent{Type: EventError, Error: retryErr}
 				close(eventChan)
 				return
@@ -372,6 +402,7 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 				select {
 				case <-ctx.Done():
 					// context cancelled
+					request.Clear() // Clear request info on context cancellation
 					if ctx.Err() != nil {
 						eventChan <- ProviderEvent{Type: EventError, Error: ctx.Err()}
 					}
@@ -381,6 +412,7 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 					continue
 				}
 			}
+			request.Clear() // Clear request info on error
 			if ctx.Err() != nil {
 				eventChan <- ProviderEvent{Type: EventError, Error: ctx.Err()}
 			}
@@ -468,5 +500,29 @@ func DefaultShouldThinkFn(s string) bool {
 func WithAnthropicShouldThinkFn(fn func(string) bool) AnthropicOption {
 	return func(options *anthropicOptions) {
 		options.shouldThink = fn
+	}
+}
+
+// logRequest logs request information to the debug log
+func (a *anthropicClient) logRequest() {
+	cfg := config.Get()
+	if cfg != nil && cfg.Data.Directory != "" {
+		logPath := filepath.Join(cfg.Data.Directory, "requests.log")
+		debugFile, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if debugFile != nil {
+			defer debugFile.Close()
+			
+			// Determine the actual URL being used
+			baseURL := "https://api.anthropic.com"
+			if a.options.useBedrock {
+				baseURL = "AWS Bedrock"
+			}
+			
+			fmt.Fprintf(debugFile, "[%s] Provider: %s, Model: %s, URL: %s\n",
+				time.Now().Format("15:04:05"),
+				a.providerOptions.model.Provider,
+				a.providerOptions.model.APIModel,
+				baseURL)
+		}
 	}
 }

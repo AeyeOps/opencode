@@ -120,6 +120,8 @@ to assist developers in writing, debugging, and understanding code directly from
 		program := tea.NewProgram(
 			tui.New(app),
 			tea.WithAltScreen(),
+			// Mouse support disabled until Bubble Tea implements native selection
+			// Use Ctrl+U/D and PageUp/Down for scrolling
 		)
 
 		// Setup the subscriptions, this will send services events to the TUI

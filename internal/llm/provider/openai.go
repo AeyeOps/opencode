@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/openai/openai-go"
@@ -16,6 +18,7 @@ import (
 	"github.com/opencode-ai/opencode/internal/llm/tools"
 	"github.com/opencode-ai/opencode/internal/logging"
 	"github.com/opencode-ai/opencode/internal/message"
+	"github.com/opencode-ai/opencode/internal/request"
 )
 
 type openaiOptions struct {
@@ -42,6 +45,7 @@ func newOpenAIClient(opts providerClientOptions) OpenAIClient {
 	for _, o := range opts.openaiOptions {
 		o(&openaiOpts)
 	}
+	
 
 	openaiClientOptions := []option.RequestOption{}
 	if opts.apiKey != "" {
@@ -89,10 +93,12 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 				Role: "assistant",
 			}
 
+			hasContent := false
 			if msg.Content().String() != "" {
 				assistantMsg.Content = openai.ChatCompletionAssistantMessageParamContentUnion{
 					OfString: openai.String(msg.Content().String()),
 				}
+				hasContent = true
 			}
 
 			if len(msg.ToolCalls()) > 0 {
@@ -107,11 +113,15 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 						},
 					}
 				}
+				hasContent = true
 			}
 
-			openaiMessages = append(openaiMessages, openai.ChatCompletionMessageParamUnion{
-				OfAssistant: &assistantMsg,
-			})
+			// Only add the message if it has content or tool calls
+			if hasContent {
+				openaiMessages = append(openaiMessages, openai.ChatCompletionMessageParamUnion{
+					OfAssistant: &assistantMsg,
+				})
+			}
 
 		case message.Tool:
 			for _, result := range msg.ToolResults() {
@@ -187,10 +197,24 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 
 func (o *openaiClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
 	params := o.preparedParams(o.convertMessages(messages), o.convertTools(tools))
+	return o.sendWithParams(ctx, params)
+}
+
+func (o *openaiClient) sendWithParams(ctx context.Context, params openai.ChatCompletionNewParams) (response *ProviderResponse, err error) {
+	// Set current request info for display
+	baseURL := "https://api.openai.com/v1"
+	if o.options.baseURL != "" {
+		baseURL = o.options.baseURL
+	}
+	request.SetCurrent(string(o.providerOptions.model.Provider), o.providerOptions.model.APIModel, baseURL)
+	
 	cfg := config.Get()
 	if cfg.Debug {
 		jsonData, _ := json.Marshal(params)
 		logging.Debug("Prepared messages", "messages", string(jsonData))
+		
+		// Log request info to file
+		o.logRequest()
 	}
 	attempts := 0
 	for {
@@ -203,17 +227,20 @@ func (o *openaiClient) send(ctx context.Context, messages []message.Message, too
 		if err != nil {
 			retry, after, retryErr := o.shouldRetry(attempts, err)
 			if retryErr != nil {
+				request.Clear() // Clear request info on error
 				return nil, retryErr
 			}
 			if retry {
 				logging.WarnPersist(fmt.Sprintf("Retrying due to rate limit... attempt %d of %d", attempts, maxRetries), logging.PersistTimeArg, time.Millisecond*time.Duration(after+100))
 				select {
 				case <-ctx.Done():
+					request.Clear() // Clear request info on context cancellation
 					return nil, ctx.Err()
 				case <-time.After(time.Duration(after) * time.Millisecond):
 					continue
 				}
 			}
+			request.Clear() // Clear request info on error
 			return nil, retryErr
 		}
 
@@ -229,6 +256,7 @@ func (o *openaiClient) send(ctx context.Context, messages []message.Message, too
 			finishReason = message.FinishReasonToolUse
 		}
 
+		request.Clear() // Clear request info on successful completion
 		return &ProviderResponse{
 			Content:      content,
 			ToolCalls:    toolCalls,
@@ -243,11 +271,24 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 	params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
 		IncludeUsage: openai.Bool(true),
 	}
+	return o.streamWithParams(ctx, params)
+}
 
+func (o *openaiClient) streamWithParams(ctx context.Context, params openai.ChatCompletionNewParams) <-chan ProviderEvent {
+	// Set current request info for display
+	baseURL := "https://api.openai.com/v1"
+	if o.options.baseURL != "" {
+		baseURL = o.options.baseURL
+	}
+	request.SetCurrent(string(o.providerOptions.model.Provider), o.providerOptions.model.APIModel, baseURL)
+	
 	cfg := config.Get()
 	if cfg.Debug {
 		jsonData, _ := json.Marshal(params)
 		logging.Debug("Prepared messages", "messages", string(jsonData))
+		
+		// Log request info to file
+		o.logRequest()
 	}
 
 	attempts := 0
@@ -256,6 +297,17 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 	go func() {
 		for {
 			attempts++
+			
+			// Debug logging for xAI
+			if o.options.baseURL == "https://api.x.ai/v1" {
+				debugFile, _ := os.OpenFile("/tmp/xai-stream-debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+				if debugFile != nil {
+					fmt.Fprintf(debugFile, "[%s] OpenAI client: Starting stream attempt %d\n", 
+						time.Now().Format("2006-01-02 15:04:05.000"), attempts)
+					debugFile.Close()
+				}
+			}
+			
 			openaiStream := o.client.Chat.Completions.NewStreaming(
 				ctx,
 				params,
@@ -281,6 +333,28 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			}
 
 			err := openaiStream.Err()
+			
+			// Debug logging for xAI
+			if o.options.baseURL == "https://api.x.ai/v1" {
+				debugFile, _ := os.OpenFile("/tmp/xai-stream-debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+				if debugFile != nil {
+					if err != nil {
+						fmt.Fprintf(debugFile, "[%s] OpenAI client: Stream error: %v\n", 
+							time.Now().Format("2006-01-02 15:04:05.000"), err)
+						// Try to get more details about the error
+						var apierr *openai.Error
+						if errors.As(err, &apierr) {
+							fmt.Fprintf(debugFile, "[%s] OpenAI client: API Error - Status: %d, Message: %s\n", 
+								time.Now().Format("2006-01-02 15:04:05.000"), apierr.StatusCode, apierr.Message)
+						}
+					} else {
+						fmt.Fprintf(debugFile, "[%s] OpenAI client: Stream completed successfully\n", 
+							time.Now().Format("2006-01-02 15:04:05.000"))
+					}
+					debugFile.Close()
+				}
+			}
+			
 			if err == nil || errors.Is(err, io.EOF) {
 				// Stream completed successfully
 				finishReason := o.finishReason(string(acc.ChatCompletion.Choices[0].FinishReason))
@@ -300,13 +374,26 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 						FinishReason: finishReason,
 					},
 				}
+				request.Clear() // Clear request info on successful completion
 				close(eventChan)
 				return
 			}
 
 			// If there is an error we are going to see if we can retry the call
 			retry, after, retryErr := o.shouldRetry(attempts, err)
+			
+			// Debug logging for xAI
+			if o.options.baseURL == "https://api.x.ai/v1" {
+				debugFile, _ := os.OpenFile("/tmp/xai-stream-debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+				if debugFile != nil {
+					fmt.Fprintf(debugFile, "[%s] OpenAI client: shouldRetry returned: retry=%v, after=%d, retryErr=%v\n", 
+						time.Now().Format("2006-01-02 15:04:05.000"), retry, after, retryErr)
+					debugFile.Close()
+				}
+			}
+			
 			if retryErr != nil {
+				request.Clear() // Clear request info on error
 				eventChan <- ProviderEvent{Type: EventError, Error: retryErr}
 				close(eventChan)
 				return
@@ -316,7 +403,8 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 				select {
 				case <-ctx.Done():
 					// context cancelled
-					if ctx.Err() == nil {
+					request.Clear() // Clear request info on context cancellation
+					if ctx.Err() != nil {
 						eventChan <- ProviderEvent{Type: EventError, Error: ctx.Err()}
 					}
 					close(eventChan)
@@ -325,6 +413,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 					continue
 				}
 			}
+			request.Clear() // Clear request info on error
 			eventChan <- ProviderEvent{Type: EventError, Error: retryErr}
 			close(eventChan)
 			return
@@ -421,5 +510,29 @@ func WithReasoningEffort(effort string) OpenAIOption {
 			logging.Warn("Invalid reasoning effort, using default: medium")
 		}
 		options.reasoningEffort = defaultReasoningEffort
+	}
+}
+
+// logRequest logs request information to the debug log
+func (o *openaiClient) logRequest() {
+	cfg := config.Get()
+	if cfg != nil && cfg.Data.Directory != "" {
+		logPath := filepath.Join(cfg.Data.Directory, "requests.log")
+		debugFile, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if debugFile != nil {
+			defer debugFile.Close()
+			
+			// Determine the actual URL being used
+			baseURL := "https://api.openai.com/v1"
+			if o.options.baseURL != "" {
+				baseURL = o.options.baseURL
+			}
+			
+			fmt.Fprintf(debugFile, "[%s] Provider: %s, Model: %s, URL: %s\n",
+				time.Now().Format("15:04:05"),
+				o.providerOptions.model.Provider,
+				o.providerOptions.model.APIModel,
+				baseURL)
+		}
 	}
 }

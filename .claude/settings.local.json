@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git remote set-url origin https://github.com/AeyeOps/opencode.git)",
+      "Bash(go:*)",
+      "Bash(ls:*)"
+    ],
+    "deny": []
+  }
+}

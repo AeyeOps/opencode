@@ -370,12 +370,30 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 					tool = availableTool
 					break
 				}
-				// Monkey patch for Copilot Sonnet-4 tool repetition obfuscation
-				// if strings.HasPrefix(toolCall.Name, availableTool.Info().Name) &&
-				// 	strings.HasPrefix(toolCall.Name, availableTool.Info().Name+availableTool.Info().Name) {
-				// 	tool = availableTool
-				// 	break
-				// }
+				// Handle tool name repetition (e.g., "writewritewrite" -> "write")
+				// Some models repeat tool names multiple times
+				toolName := availableTool.Info().Name
+				if len(toolCall.Name) >= len(toolName)*2 && strings.HasPrefix(toolCall.Name, toolName) {
+					// Check if the call name is the tool name repeated
+					repeated := true
+					for i := 0; i < len(toolCall.Name); i += len(toolName) {
+						if i+len(toolName) > len(toolCall.Name) {
+							if toolCall.Name[i:] != toolName[:len(toolCall.Name)-i] {
+								repeated = false
+								break
+							}
+						} else if toolCall.Name[i:i+len(toolName)] != toolName {
+							repeated = false
+							break
+						}
+					}
+					if repeated {
+						tool = availableTool
+						// Fix the tool name in the call
+						toolCall.Name = toolName
+						break
+					}
+				}
 			}
 
 			// Tool not found
@@ -460,15 +478,11 @@ func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg
 	case provider.EventToolUseStart:
 		assistantMsg.AddToolCall(*event.ToolCall)
 		return a.messages.Update(ctx, *assistantMsg)
-	// TODO: see how to handle this
-	// case provider.EventToolUseDelta:
-	// 	tm := time.Unix(assistantMsg.UpdatedAt, 0)
-	// 	assistantMsg.AppendToolCallInput(event.ToolCall.ID, event.ToolCall.Input)
-	// 	if time.Since(tm) > 1000*time.Millisecond {
-	// 		err := a.messages.Update(ctx, *assistantMsg)
-	// 		assistantMsg.UpdatedAt = time.Now().Unix()
-	// 		return err
-	// 	}
+	case provider.EventToolUseDelta:
+		// Append the tool call input delta
+		assistantMsg.AppendToolCallInput(event.ToolCall.ID, event.ToolCall.Input)
+		// Update the message to show progress
+		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventToolUseStop:
 		assistantMsg.FinishToolCall(event.ToolCall.ID)
 		return a.messages.Update(ctx, *assistantMsg)
@@ -478,6 +492,11 @@ func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg
 			return context.Canceled
 		}
 		logging.ErrorPersist(event.Error.Error())
+		assistantMsg.AddFinish(message.FinishReasonError)
+		assistantMsg.AppendContent(fmt.Sprintf("Error: %v", event.Error))
+		if err := a.messages.Update(ctx, *assistantMsg); err != nil {
+			return fmt.Errorf("failed to update message with error: %w", err)
+		}
 		return event.Error
 	case provider.EventComplete:
 		assistantMsg.SetToolCalls(event.Response.ToolCalls)
@@ -514,22 +533,29 @@ func (a *agent) TrackUsage(ctx context.Context, sessionID string, model models.M
 }
 
 func (a *agent) Update(agentName config.AgentName, modelID models.ModelID) (models.Model, error) {
+	logging.Info("agent.Update called", "agent", agentName, "modelID", modelID)
+	
 	if a.IsBusy() {
+		logging.Error("cannot change model while busy")
 		return models.Model{}, fmt.Errorf("cannot change model while processing requests")
 	}
 
 	if err := config.UpdateAgentModel(agentName, modelID); err != nil {
+		logging.Error("failed to update config", "error", err)
 		return models.Model{}, fmt.Errorf("failed to update config: %w", err)
 	}
 
 	provider, err := createAgentProvider(agentName)
 	if err != nil {
+		logging.Error("failed to create provider", "modelID", modelID, "error", err)
 		return models.Model{}, fmt.Errorf("failed to create provider for model %s: %w", modelID, err)
 	}
 
 	a.provider = provider
+	actualModel := a.provider.Model()
+	logging.Info("provider updated successfully", "requestedModel", modelID, "actualModel", actualModel.ID)
 
-	return a.provider.Model(), nil
+	return actualModel, nil
 }
 
 func (a *agent) Summarize(ctx context.Context, sessionID string) error {
@@ -707,18 +733,27 @@ func createAgentProvider(agentName config.AgentName) (provider.Provider, error) 
 	cfg := config.Get()
 	agentConfig, ok := cfg.Agents[agentName]
 	if !ok {
+		logging.Error("agent not found", "agent", agentName)
 		return nil, fmt.Errorf("agent %s not found", agentName)
 	}
+	logging.Info("creating agent provider", "agent", agentName, "modelID", agentConfig.Model)
+	
 	model, ok := models.SupportedModels[agentConfig.Model]
 	if !ok {
+		logging.Error("model not supported", "modelID", agentConfig.Model)
 		return nil, fmt.Errorf("model %s not supported", agentConfig.Model)
 	}
+	logging.Info("found model", "modelID", model.ID, "provider", model.Provider, "name", model.Name)
 
 	providerCfg, ok := cfg.Providers[model.Provider]
 	if !ok {
+		logging.Error("provider not found in config", "provider", model.Provider)
 		return nil, fmt.Errorf("provider %s not supported", model.Provider)
 	}
+	logging.Info("provider config found", "provider", model.Provider, "disabled", providerCfg.Disabled, "hasAPIKey", providerCfg.APIKey != "")
+	
 	if providerCfg.Disabled {
+		logging.Error("provider is disabled", "provider", model.Provider)
 		return nil, fmt.Errorf("provider %s is not enabled", model.Provider)
 	}
 	maxTokens := model.DefaultMaxTokens

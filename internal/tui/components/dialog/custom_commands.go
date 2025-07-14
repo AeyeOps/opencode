@@ -45,7 +45,7 @@ func LoadCustomCommands() ([]Command, error) {
 		userCommands, err := loadCommandsFromDir(userCommandsDir, UserCommandPrefix)
 		if err != nil {
 			// Log error but continue - we'll still try to load other commands
-			fmt.Printf("Warning: failed to load user commands from XDG_CONFIG_HOME: %v\n", err)
+			// Warning: failed to load user commands from XDG_CONFIG_HOME
 		} else {
 			commands = append(commands, userCommands...)
 		}
@@ -58,7 +58,7 @@ func LoadCustomCommands() ([]Command, error) {
 		homeCommands, err := loadCommandsFromDir(homeCommandsDir, UserCommandPrefix)
 		if err != nil {
 			// Log error but continue - we'll still try to load other commands
-			fmt.Printf("Warning: failed to load home commands: %v\n", err)
+			// Warning: failed to load home commands
 		} else {
 			commands = append(commands, homeCommands...)
 		}
@@ -69,7 +69,7 @@ func LoadCustomCommands() ([]Command, error) {
 	projectCommands, err := loadCommandsFromDir(projectCommandsDir, ProjectCommandPrefix)
 	if err != nil {
 		// Log error but return what we have so far
-		fmt.Printf("Warning: failed to load project commands: %v\n", err)
+		// Warning: failed to load project commands
 	} else {
 		commands = append(commands, projectCommands...)
 	}

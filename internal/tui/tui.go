@@ -358,11 +358,16 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case dialog.ModelSelectedMsg:
 		a.showModelDialog = false
+		
+		// Model selected: msg.Model.Name
 
 		model, err := a.app.CoderAgent.Update(config.AgentCoder, msg.Model.ID)
 		if err != nil {
+			// Error updating model
 			return a, util.ReportError(err)
 		}
+		
+		// Model successfully changed
 
 		return a, util.ReportInfo(fmt.Sprintf("Model changed to %s", model.Name))
 

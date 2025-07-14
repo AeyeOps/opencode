@@ -278,6 +278,14 @@ func (p *permissionDialogCmp) renderBashContent() string {
 		renderedContent := p.GetOrSetMarkdown(p.permission.ID, func() (string, error) {
 			r := styles.GetMarkdownRenderer(p.width - 10)
 			s, err := r.Render(content)
+			
+			// Fix HTML entity encoding - decode entities after markdown rendering
+			s = strings.ReplaceAll(s, "&amp;", "&")
+			s = strings.ReplaceAll(s, "&lt;", "<")
+			s = strings.ReplaceAll(s, "&gt;", ">")
+			s = strings.ReplaceAll(s, "&quot;", "\"")
+			s = strings.ReplaceAll(s, "&#39;", "'")
+			
 			return styles.ForceReplaceBackgroundWithLipgloss(s, t.Background()), err
 		})
 
@@ -338,6 +346,14 @@ func (p *permissionDialogCmp) renderFetchContent() string {
 		renderedContent := p.GetOrSetMarkdown(p.permission.ID, func() (string, error) {
 			r := styles.GetMarkdownRenderer(p.width - 10)
 			s, err := r.Render(content)
+			
+			// Fix HTML entity encoding - decode entities after markdown rendering
+			s = strings.ReplaceAll(s, "&amp;", "&")
+			s = strings.ReplaceAll(s, "&lt;", "<")
+			s = strings.ReplaceAll(s, "&gt;", ">")
+			s = strings.ReplaceAll(s, "&quot;", "\"")
+			s = strings.ReplaceAll(s, "&#39;", "'")
+			
 			return styles.ForceReplaceBackgroundWithLipgloss(s, t.Background()), err
 		})
 
@@ -360,6 +376,14 @@ func (p *permissionDialogCmp) renderDefaultContent() string {
 	renderedContent := p.GetOrSetMarkdown(p.permission.ID, func() (string, error) {
 		r := styles.GetMarkdownRenderer(p.width - 10)
 		s, err := r.Render(content)
+		
+		// Fix HTML entity encoding - decode entities after markdown rendering
+		s = strings.ReplaceAll(s, "&amp;", "&")
+		s = strings.ReplaceAll(s, "&lt;", "<")
+		s = strings.ReplaceAll(s, "&gt;", ">")
+		s = strings.ReplaceAll(s, "&quot;", "\"")
+		s = strings.ReplaceAll(s, "&#39;", "'")
+		
 		return styles.ForceReplaceBackgroundWithLipgloss(s, t.Background()), err
 	})
 

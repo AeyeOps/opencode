@@ -27,7 +27,7 @@ const (
 	assistantMessageType
 	toolMessageType
 
-	maxResultHeight = 10
+	maxResultHeight = 50  // Increased from 10 to allow more useful tool output
 )
 
 type uiMessage struct {
@@ -41,6 +41,15 @@ type uiMessage struct {
 func toMarkdown(content string, focused bool, width int) string {
 	r := styles.GetMarkdownRenderer(width)
 	rendered, _ := r.Render(content)
+	
+	// Fix HTML entity encoding in code blocks
+	// Glamour escapes & to &amp; which displays literally in the TUI
+	rendered = strings.ReplaceAll(rendered, "&amp;", "&")
+	rendered = strings.ReplaceAll(rendered, "&lt;", "<")
+	rendered = strings.ReplaceAll(rendered, "&gt;", ">")
+	rendered = strings.ReplaceAll(rendered, "&quot;", "\"")
+	rendered = strings.ReplaceAll(rendered, "&#39;", "'")
+	
 	return rendered
 }
 
@@ -154,35 +163,54 @@ func renderAssistantMessage(
 		case message.FinishReasonError:
 			info = append(info, baseStyle.
 				Width(width-1).
-				Foreground(t.TextMuted()).
-				Render(fmt.Sprintf(" %s (%s)", models.SupportedModels[msg.Model].Name, "error")),
+				Foreground(t.Error()).
+				Render(fmt.Sprintf(" %s (error)", models.SupportedModels[msg.Model].Name)),
 			)
+			// If there's no content, add an error message
+			if content == "" {
+				content = "*An error occurred processing this request*"
+			}
 		case message.FinishReasonPermissionDenied:
 			info = append(info, baseStyle.
 				Width(width-1).
-				Foreground(t.TextMuted()).
-				Render(fmt.Sprintf(" %s (%s)", models.SupportedModels[msg.Model].Name, "permission denied")),
+				Foreground(t.Error()).
+				Render(fmt.Sprintf(" %s (permission denied)", models.SupportedModels[msg.Model].Name)),
 			)
+			// If there's no content, add an error message
+			if content == "" {
+				content = "*Permission denied - check your API key or access rights*"
+			}
 		}
 	}
 	if content != "" || (finished && finishData.Reason == message.FinishReasonEndTurn) {
 		if content == "" {
-			content = "*Finished without output*"
+			// Check if there were tool calls
+			toolCallCount := len(msg.ToolCalls())
+			if toolCallCount > 0 {
+				// Don't show "Finished without output" if there were tool calls
+				// The tool calls themselves will be displayed below
+			} else {
+				// Only show this if there were no tool calls AND no content
+				content = "*No response generated*"
+			}
 		}
 		if isSummary {
 			info = append(info, baseStyle.Width(width-1).Foreground(t.TextMuted()).Render(" (summary)"))
 		}
 
-		content = renderMessage(content, false, true, width, info...)
-		messages = append(messages, uiMessage{
-			ID:          msg.ID,
-			messageType: assistantMessageType,
-			position:    position,
-			height:      lipgloss.Height(content),
-			content:     content,
-		})
-		position += messages[0].height
-		position++ // for the space
+		// Only create a message UI element if there's actual content to show
+		if content != "" {
+			content = renderMessage(content, false, true, width, info...)
+			messages = append(messages, uiMessage{
+				ID:          msg.ID,
+				messageType: assistantMessageType,
+				position:    position,
+				height:      lipgloss.Height(content),
+				content:     content,
+			})
+			position += messages[0].height
+			position++ // for the space
+		}
 	} else if thinking && thinkingContent != "" {
 		// Render the thinking content
 		content = renderMessage(thinkingContent, false, msg.ID == focusedUIMessageId, width)
@@ -451,7 +479,19 @@ func renderToolResponse(toolCall message.ToolCall, response message.ToolResult, 
 			Render(errContent)
 	}
 
-	resultContent := truncateHeight(response.Content, maxResultHeight)
+	// Check if any tool output would be truncated
+	resultContent := response.Content
+	lines := strings.Split(response.Content, "\n")
+	if len(lines) > maxResultHeight {
+		// Results would be truncated - show a truncation indicator
+		// The model still receives the full output up to the tool's limits
+		truncatedMsg := fmt.Sprintf("... Output truncated for display (showing %d of %d lines) ...", maxResultHeight, len(lines))
+		
+		// Add the truncation message at the end of the truncated content
+		truncatedLines := lines[:maxResultHeight-1]
+		truncatedLines = append(truncatedLines, truncatedMsg)
+		resultContent = strings.Join(truncatedLines, "\n")
+	}
 	switch toolCall.Name {
 	case agent.AgentToolName:
 		return styles.ForceReplaceBackgroundWithLipgloss(
@@ -473,6 +513,16 @@ func renderToolResponse(toolCall message.ToolCall, response message.ToolResult, 
 	case tools.FetchToolName:
 		var params tools.FetchParams
 		json.Unmarshal([]byte(toolCall.Input), &params)
+		
+		// Limit fetch responses to prevent TUI corruption
+		maxFetchHeight := 30
+		truncatedContent := truncateHeight(resultContent, maxFetchHeight)
+		
+		// Add truncation indicator if needed
+		if len(strings.Split(resultContent, "\n")) > maxFetchHeight {
+			truncatedContent += "\n... (truncated)"
+		}
+		
 		mdFormat := "markdown"
 		switch params.Format {
 		case "text":
@@ -480,7 +530,7 @@ func renderToolResponse(toolCall message.ToolCall, response message.ToolResult, 
 		case "html":
 			mdFormat = "html"
 		}
-		resultContent = fmt.Sprintf("```%s\n%s\n```", mdFormat, resultContent)
+		resultContent = fmt.Sprintf("```%s\n%s\n```", mdFormat, truncatedContent)
 		return styles.ForceReplaceBackgroundWithLipgloss(
 			toMarkdown(resultContent, true, width),
 			t.Background(),

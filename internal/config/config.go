@@ -255,6 +255,7 @@ func setDefaults(debug bool) {
 func setProviderDefaults() {
 	// Set all API keys we can find in the environment
 	// Note: Viper does not default if the json apiKey is ""
+	
 	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
 		viper.SetDefault("providers.anthropic.apiKey", apiKey)
 	}
@@ -272,6 +273,7 @@ func setProviderDefaults() {
 	}
 	if apiKey := os.Getenv("XAI_API_KEY"); apiKey != "" {
 		viper.SetDefault("providers.xai.apiKey", apiKey)
+		viper.SetDefault("providers.xai2.apiKey", apiKey)
 	}
 	if apiKey := os.Getenv("AZURE_OPENAI_ENDPOINT"); apiKey != "" {
 		// api-key may be empty when using Entra ID credentials – that's okay
@@ -479,38 +481,19 @@ func validateAgent(cfg *Config, name AgentName, agent Agent) error {
 	// 		 	endpoint should be queried to validate if the model is supported.
 	model, modelExists := models.SupportedModels[agent.Model]
 	if !modelExists {
-		logging.Warn("unsupported model configured, reverting to default",
-			"agent", name,
-			"configured_model", agent.Model)
-
-		// Set default model based on available providers
-		if setDefaultModelForAgent(name) {
-			logging.Info("set default model for agent", "agent", name, "model", cfg.Agents[name].Model)
-		} else {
-			return fmt.Errorf("no valid provider available for agent %s", name)
-		}
-		return nil
+		return fmt.Errorf("unsupported model '%s' configured for agent %s", agent.Model, name)
 	}
 
 	// Check if provider for the model is configured
 	provider := model.Provider
+	logging.Info("[ValidateAgent] Model selected", "model", agent.Model, "provider", provider, "modelExists", modelExists)
 	providerCfg, providerExists := cfg.Providers[provider]
 
 	if !providerExists {
 		// Provider not configured, check if we have environment variables
 		apiKey := getProviderAPIKey(provider)
 		if apiKey == "" {
-			logging.Warn("provider not configured for model, reverting to default",
-				"agent", name,
-				"model", agent.Model,
-				"provider", provider)
-
-			// Set default model based on available providers
-			if setDefaultModelForAgent(name) {
-				logging.Info("set default model for agent", "agent", name, "model", cfg.Agents[name].Model)
-			} else {
-				return fmt.Errorf("no valid provider available for agent %s", name)
-			}
+			return fmt.Errorf("provider %s not configured for model %s (no API key found)", provider, agent.Model)
 		} else {
 			// Add provider with API key from environment
 			cfg.Providers[provider] = Provider{
@@ -520,17 +503,10 @@ func validateAgent(cfg *Config, name AgentName, agent Agent) error {
 		}
 	} else if providerCfg.Disabled || providerCfg.APIKey == "" {
 		// Provider is disabled or has no API key
-		logging.Warn("provider is disabled or has no API key, reverting to default",
-			"agent", name,
-			"model", agent.Model,
-			"provider", provider)
-
-		// Set default model based on available providers
-		if setDefaultModelForAgent(name) {
-			logging.Info("set default model for agent", "agent", name, "model", cfg.Agents[name].Model)
-		} else {
-			return fmt.Errorf("no valid provider available for agent %s", name)
+		if providerCfg.Disabled {
+			return fmt.Errorf("provider %s is disabled for model %s", provider, agent.Model)
 		}
+		return fmt.Errorf("provider %s has no API key configured for model %s", provider, agent.Model)
 	}
 
 	// Validate max tokens
@@ -620,8 +596,8 @@ func Validate() error {
 
 	// Validate providers
 	for provider, providerCfg := range cfg.Providers {
+		logging.Info("validating provider", "provider", provider, "hasAPIKey", providerCfg.APIKey != "", "disabled", providerCfg.Disabled)
 		if providerCfg.APIKey == "" && !providerCfg.Disabled {
-			fmt.Printf("provider has no API key, marking as disabled %s", provider)
 			logging.Warn("provider has no API key, marking as disabled", "provider", provider)
 			providerCfg.Disabled = true
 			cfg.Providers[provider] = providerCfg
@@ -642,6 +618,7 @@ func Validate() error {
 
 // getProviderAPIKey gets the API key for a provider from environment variables
 func getProviderAPIKey(provider models.ModelProvider) string {
+	logging.Info("getProviderAPIKey called", "provider", provider)
 	switch provider {
 	case models.ProviderAnthropic:
 		return os.Getenv("ANTHROPIC_API_KEY")
@@ -655,6 +632,14 @@ func getProviderAPIKey(provider models.ModelProvider) string {
 		return os.Getenv("AZURE_OPENAI_API_KEY")
 	case models.ProviderOpenRouter:
 		return os.Getenv("OPENROUTER_API_KEY")
+	case models.ProviderXAI:
+		apiKey := os.Getenv("XAI_API_KEY")
+		logging.Info("xAI API key check", "hasKey", apiKey != "")
+		return apiKey
+	case models.ProviderXAI2:
+		apiKey := os.Getenv("XAI_API_KEY")
+		logging.Info("xAI2 API key check", "hasKey", apiKey != "")
+		return apiKey
 	case models.ProviderBedrock:
 		if hasAWSCredentials() {
 			return "aws-credentials-available"
@@ -664,6 +649,7 @@ func getProviderAPIKey(provider models.ModelProvider) string {
 			return "vertex-ai-credentials-available"
 		}
 	}
+	logging.Warn("provider not found in getProviderAPIKey", "provider", provider)
 	return ""
 }
 
@@ -880,11 +866,14 @@ func UpdateAgentModel(agentName AgentName, modelID models.ModelID) error {
 	if cfg == nil {
 		panic("config not loaded")
 	}
+	
+	logging.Info("UpdateAgentModel called", "agent", agentName, "modelID", modelID)
 
 	existingAgentCfg := cfg.Agents[agentName]
 
 	model, ok := models.SupportedModels[modelID]
 	if !ok {
+		logging.Error("model not supported", "modelID", modelID)
 		return fmt.Errorf("model %s not supported", modelID)
 	}
 
@@ -899,9 +888,11 @@ func UpdateAgentModel(agentName AgentName, modelID models.ModelID) error {
 		ReasoningEffort: existingAgentCfg.ReasoningEffort,
 	}
 	cfg.Agents[agentName] = newAgentCfg
+	logging.Info("updated agent config", "agent", agentName, "newModel", modelID)
 
 	if err := validateAgent(cfg, agentName, newAgentCfg); err != nil {
 		// revert config update on failure
+		logging.Error("agent validation failed, reverting", "agent", agentName, "error", err)
 		cfg.Agents[agentName] = existingAgentCfg
 		return fmt.Errorf("failed to update agent model: %w", err)
 	}

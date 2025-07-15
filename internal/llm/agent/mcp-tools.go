@@ -152,18 +152,18 @@ func getTools(ctx context.Context, name string, m config.MCPServer, permissions 
 
 	logging.Debug("getTools: Initializing MCP client", "name", name, "protocolVersion", initRequest.Params.ProtocolVersion)
 	logging.Debug("getTools: Sending initialize request", "name", name, "clientInfo", initRequest.Params.ClientInfo)
-	
+
 	// Add timeout for initialization
 	initCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	
+
 	initResult, err := c.Initialize(initCtx, initRequest)
 	if err != nil {
 		logging.Error("error initializing mcp client", "name", name, "error", err, "contextErr", initCtx.Err())
 		return stdioTools
 	}
 	logging.Debug("getTools: MCP client initialized successfully", "name", name, "serverInfo", initResult.ServerInfo, "capabilities", initResult.Capabilities)
-	
+
 	toolsRequest := mcp.ListToolsRequest{}
 	logging.Debug("getTools: Listing tools from MCP server", "name", name)
 	tools, err := c.ListTools(ctx, toolsRequest)
@@ -172,7 +172,7 @@ func getTools(ctx context.Context, name string, m config.MCPServer, permissions 
 		return stdioTools
 	}
 	logging.Debug("getTools: Retrieved tool list", "name", name, "count", len(tools.Tools))
-	
+
 	for _, t := range tools.Tools {
 		logging.Debug("getTools: Adding tool", "name", name, "toolName", t.Name)
 		stdioTools = append(stdioTools, NewMcpTool(name, t, permissions, m))
@@ -188,19 +188,19 @@ func GetMcpTools(ctx context.Context, permissions permission.Service) []tools.Ba
 		logging.Debug("GetMcpTools: Returning cached MCP tools", "count", len(mcpTools))
 		return mcpTools
 	}
-	
+
 	mcpServers := config.Get().MCPServers
 	logging.Debug("GetMcpTools: Found MCP servers", "count", len(mcpServers))
-	
+
 	for name, m := range mcpServers {
 		logging.Debug("GetMcpTools: Processing MCP server", "name", name, "type", m.Type, "command", m.Command, "args", m.Args)
 		switch m.Type {
 		case config.MCPStdio:
 			logging.Debug("GetMcpTools: Creating stdio MCP client", "name", name, "command", m.Command, "args", m.Args, "env", m.Env)
-			
+
 			// Log the full command that will be executed
 			logging.Debug("GetMcpTools: Executing command", "name", name, "fullCommand", fmt.Sprintf("%s %v", m.Command, m.Args))
-			
+
 			c, err := client.NewStdioMCPClient(
 				m.Command,
 				m.Env,

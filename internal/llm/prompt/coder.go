@@ -332,10 +332,10 @@ func loadExternalGrokPrompt() string {
 	if err != nil {
 		return baseXAICoderPrompt
 	}
-	
+
 	opencodeDir := filepath.Join(homeDir, ".opencode")
 	promptPath := filepath.Join(opencodeDir, "grok4-system-prompt.md")
-	
+
 	// Check if file exists
 	if _, err := os.Stat(promptPath); os.IsNotExist(err) {
 		// Create directory if needed
@@ -345,14 +345,14 @@ func loadExternalGrokPrompt() string {
 			os.WriteFile(promptPath, []byte(defaultPrompt), 0644)
 		}
 	}
-	
+
 	// Always read from file (don't cache)
 	content, err := os.ReadFile(promptPath)
 	if err != nil {
 		// If we still can't read, return the default
 		return getDefaultGrok4Prompt()
 	}
-	
+
 	return string(content)
 }
 

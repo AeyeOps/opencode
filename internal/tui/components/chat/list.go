@@ -104,7 +104,7 @@ func (m *messagesCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport = u
 			cmds = append(cmds, cmd)
 		}
-	
+
 	case tea.MouseMsg:
 		// Only handle wheel events, let click/drag pass through for text selection
 		switch msg.Action {
@@ -432,7 +432,7 @@ func (m *messagesCmp) initialScreen() string {
 		"",
 		lspsConfigured(m.width),
 	}
-	
+
 	// Add request info if available
 	if reqInfo := requestInfo(m.width); reqInfo != "" {
 		sections = append(sections, "", reqInfo)
@@ -510,8 +510,8 @@ func NewMessagesCmp(app *app.App) tea.Model {
 	vp.KeyMap.PageDown = messageKeys.PageDown
 	vp.KeyMap.HalfPageUp = messageKeys.HalfPageUp
 	vp.KeyMap.HalfPageDown = messageKeys.HalfPageDown
-	vp.MouseWheelEnabled = true  // Enable mouse wheel scrolling
-	vp.MouseWheelDelta = 1       // Scroll 1 line at a time for natural feel
+	vp.MouseWheelEnabled = true // Enable mouse wheel scrolling
+	vp.MouseWheelDelta = 1      // Scroll 1 line at a time for natural feel
 	return &messagesCmp{
 		app:           app,
 		cachedContent: make(map[string]cacheItem),

@@ -91,8 +91,7 @@ func (x *xai2Client) SendMessages(ctx context.Context, messages []message.Messag
 	
 	params := x.preparedParams(openaiMessages, openaiTools)
 	
-	cfg := config.Get()
-	if cfg.Debug {
+	if x.isDebugMode() {
 		x.logRequest()
 	}
 	

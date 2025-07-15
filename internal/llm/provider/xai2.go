@@ -40,9 +40,9 @@ var xai2ErrorPatterns = []string{
 
 // xai2Client is a standalone xAI client that doesn't inherit from OpenAI
 type xai2Client struct {
-	client           openai.Client
-	options          openaiOptions
-	providerOptions  providerClientOptions
+	client          openai.Client
+	options         openaiOptions
+	providerOptions providerClientOptions
 }
 
 // xai2ContentError represents an error when xAI returns error messages as content
@@ -85,24 +85,24 @@ func NewXAI2Client(apiKey string, providerOptions providerClientOptions) (*xai2C
 func (x *xai2Client) SendMessages(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error) {
 	// Set current request info for display
 	request.SetCurrent(string(x.providerOptions.model.Provider), x.providerOptions.model.APIModel, x.options.baseURL)
-	
+
 	openaiMessages := x.convertMessages(messages)
 	openaiTools := x.convertTools(tools)
-	
+
 	params := x.preparedParams(openaiMessages, openaiTools)
-	
+
 	cfg := config.Get()
 	if cfg.Debug {
 		x.logRequest()
 	}
-	
+
 	completion, err := x.client.Chat.Completions.New(ctx, params)
 	if err != nil {
 		request.Clear()
 		x.logError(err, params)
 		return nil, err
 	}
-	
+
 	request.Clear()
 	response := x.toProviderResponse(*completion)
 	return response, nil
@@ -111,48 +111,48 @@ func (x *xai2Client) SendMessages(ctx context.Context, messages []message.Messag
 func (x *xai2Client) StreamResponse(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
 	// Set current request info for display
 	request.SetCurrent(string(x.providerOptions.model.Provider), x.providerOptions.model.APIModel, x.options.baseURL)
-	
+
 	openaiMessages := x.convertMessages(messages)
 	openaiTools := x.convertTools(tools)
-	
+
 	params := x.preparedParams(openaiMessages, openaiTools)
 	params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
 		IncludeUsage: openai.Bool(true),
 	}
-	
+
 	return x.streamWithParams(ctx, params)
 }
 
 // streamWithParams implements custom retry logic for xAI
 func (x *xai2Client) streamWithParams(ctx context.Context, params openai.ChatCompletionNewParams) <-chan ProviderEvent {
 	eventChan := make(chan ProviderEvent)
-	
+
 	go func() {
 		defer close(eventChan)
 		attempts := 0
-		
+
 		for {
 			attempts++
-			
+
 			// Debug logging
 			if x.isDebugMode() {
 				x.logDebug("Starting stream attempt %d", attempts)
 			}
-			
+
 			// Create a new stream
 			openaiStream := x.client.Chat.Completions.NewStreaming(ctx, params)
-			
+
 			acc := openai.ChatCompletionAccumulator{}
 			currentContent := ""
 			toolCalls := make([]message.ToolCall, 0)
 			hasError := false
 			var streamErr error
-			
+
 			// Process stream chunks
 			for openaiStream.Next() {
 				chunk := openaiStream.Current()
 				acc.AddChunk(chunk)
-				
+
 				for _, choice := range chunk.Choices {
 					if choice.Delta.Content != "" {
 						// Check if content looks like an error
@@ -164,7 +164,7 @@ func (x *xai2Client) streamWithParams(ctx context.Context, params openai.ChatCom
 							}
 							break
 						}
-						
+
 						eventChan <- ProviderEvent{
 							Type:    EventContentDelta,
 							Content: choice.Delta.Content,
@@ -172,49 +172,49 @@ func (x *xai2Client) streamWithParams(ctx context.Context, params openai.ChatCom
 						currentContent += choice.Delta.Content
 					}
 				}
-				
+
 				if hasError {
 					break
 				}
 			}
-			
+
 			// Check for stream error
 			if streamErr == nil {
 				streamErr = openaiStream.Err()
 			}
-			
+
 			if streamErr != nil && !errors.Is(streamErr, io.EOF) {
 				hasError = true
-				
+
 				// Debug logging
 				if x.isDebugMode() {
 					x.logDebug("Stream error on attempt %d: %v", attempts, streamErr)
 				}
-				
+
 				// Check if we should retry
 				retry, after, retryErr := x.shouldRetry(attempts, streamErr)
-				
+
 				if x.isDebugMode() {
 					x.logDebug("shouldRetry returned: retry=%v, after=%d, retryErr=%v", retry, after, retryErr)
 				}
-				
+
 				if retryErr != nil {
 					request.Clear()
 					eventChan <- ProviderEvent{Type: EventError, Error: retryErr}
 					return
 				}
-				
+
 				if retry {
 					// Show retry message
 					logging.WarnPersist(
 						fmt.Sprintf("Retrying due to rate limit... attempt %d of %d", attempts, xai2MaxRetries),
-						logging.PersistTimeArg, 
+						logging.PersistTimeArg,
 						time.Millisecond*time.Duration(after+100),
 					)
-					
+
 					// Clear request info during retry
 					request.Clear()
-					
+
 					// Wait before retrying
 					select {
 					case <-ctx.Done():
@@ -226,13 +226,13 @@ func (x *xai2Client) streamWithParams(ctx context.Context, params openai.ChatCom
 						continue // Try again
 					}
 				}
-				
+
 				// No retry - send error
 				request.Clear()
 				eventChan <- ProviderEvent{Type: EventError, Error: streamErr}
 				return
 			}
-			
+
 			// Success - stream completed
 			if !hasError {
 				// Check if the complete content is an error
@@ -245,7 +245,7 @@ func (x *xai2Client) streamWithParams(ctx context.Context, params openai.ChatCom
 					request.Clear()
 					return
 				}
-				
+
 				finishReason := x.finishReason(string(acc.ChatCompletion.Choices[0].FinishReason))
 				if len(acc.ChatCompletion.Choices[0].Message.ToolCalls) > 0 {
 					toolCalls = append(toolCalls, x.toolCalls(acc.ChatCompletion)...)
@@ -253,7 +253,7 @@ func (x *xai2Client) streamWithParams(ctx context.Context, params openai.ChatCom
 				if len(toolCalls) > 0 {
 					finishReason = message.FinishReasonToolUse
 				}
-				
+
 				eventChan <- ProviderEvent{
 					Type: EventComplete,
 					Response: &ProviderResponse{
@@ -268,7 +268,7 @@ func (x *xai2Client) streamWithParams(ctx context.Context, params openai.ChatCom
 			}
 		}
 	}()
-	
+
 	return eventChan
 }
 
@@ -278,13 +278,13 @@ func (x *xai2Client) convertMessages(messages []message.Message) []openai.ChatCo
 	if externalPrompt := x.loadExternalGrokPrompt(); externalPrompt != "" {
 		x.providerOptions.systemMessage = externalPrompt
 	}
-	
+
 	// Prepend system message if it exists
 	openaiMessages := []openai.ChatCompletionMessageParamUnion{}
 	if x.providerOptions.systemMessage != "" {
 		openaiMessages = append(openaiMessages, openai.SystemMessage(x.providerOptions.systemMessage))
 	}
-	
+
 	// Convert the rest of the messages
 	for _, msg := range messages {
 		openaiMessages = append(openaiMessages, x.convertMessage(msg))
@@ -295,27 +295,27 @@ func (x *xai2Client) convertMessages(messages []message.Message) []openai.ChatCo
 func (x *xai2Client) loadExternalGrokPrompt() string {
 	// Search for the prompt file in the same locations as .opencode.json
 	possiblePaths := []string{}
-	
+
 	if homeDir, err := os.UserHomeDir(); err == nil {
 		// 1. $HOME/.opencode/grok4-system-prompt.md
 		possiblePaths = append(possiblePaths, filepath.Join(homeDir, ".opencode", "grok4-system-prompt.md"))
-		
+
 		// 2. $XDG_CONFIG_HOME/opencode/grok4-system-prompt.md
 		if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
 			possiblePaths = append(possiblePaths, filepath.Join(xdgConfigHome, "opencode", "grok4-system-prompt.md"))
 		}
-		
+
 		// 3. $HOME/.config/opencode/grok4-system-prompt.md
 		possiblePaths = append(possiblePaths, filepath.Join(homeDir, ".config", "opencode", "grok4-system-prompt.md"))
 	}
-	
+
 	// Try each path in order
 	for _, path := range possiblePaths {
 		if content, err := os.ReadFile(path); err == nil {
 			return string(content)
 		}
 	}
-	
+
 	return ""
 }
 
@@ -330,7 +330,7 @@ func (x *xai2Client) shouldRetry(attempts int, err error) (bool, int64, error) {
 	if attempts > xai2MaxRetries {
 		return false, 0, fmt.Errorf("maximum retry attempts reached: %d retries", xai2MaxRetries)
 	}
-	
+
 	// Check for xAI content errors
 	var xaiErr *xai2ContentError
 	if errors.As(err, &xaiErr) {
@@ -338,17 +338,17 @@ func (x *xai2Client) shouldRetry(attempts int, err error) (bool, int64, error) {
 		backoffMs := 2000 * (1 << (attempts - 1))
 		jitterMs := int(float64(backoffMs) * 0.2)
 		retryMs := backoffMs + jitterMs
-		
+
 		logging.WarnPersist(
-			fmt.Sprintf("xAI content error detected: %s. Retrying... attempt %d of %d", 
+			fmt.Sprintf("xAI content error detected: %s. Retrying... attempt %d of %d",
 				strings.TrimSpace(xaiErr.Content), attempts, xai2MaxRetries),
-			logging.PersistTimeArg, 
+			logging.PersistTimeArg,
 			time.Millisecond*time.Duration(retryMs+100),
 		)
-		
+
 		return true, int64(retryMs), nil
 	}
-	
+
 	// Check for OpenAI API errors
 	var apierr *openai.Error
 	if errors.As(err, &apierr) {
@@ -357,19 +357,19 @@ func (x *xai2Client) shouldRetry(attempts int, err error) (bool, int64, error) {
 			// This is a permanent error, don't retry
 			return false, 0, fmt.Errorf("xAI quota exceeded: %s", err.Error())
 		}
-		
+
 		// Handle standard rate limits
 		if apierr.StatusCode == 429 || apierr.StatusCode == 500 {
 			// Use exponential backoff
 			backoffMs := 2000 * (1 << (attempts - 1))
 			retryAfter := int64(backoffMs)
-			
+
 			// xAI doesn't provide retry-after headers in the error object
-			
+
 			return true, retryAfter, nil
 		}
 	}
-	
+
 	// Don't retry other errors
 	return false, 0, err
 }
@@ -379,7 +379,7 @@ func (x *xai2Client) isErrorContent(content string) bool {
 	if content == "" {
 		return false
 	}
-	
+
 	lowerContent := strings.ToLower(content)
 	for _, pattern := range xai2ErrorPatterns {
 		if strings.Contains(lowerContent, pattern) {
@@ -394,7 +394,7 @@ func (x *xai2Client) isErrorContent(content string) bool {
 func (x *xai2Client) convertMessage(msg message.Message) openai.ChatCompletionMessageParamUnion {
 	content := msg.Content().Text
 	toolCalls := msg.ToolCalls()
-	
+
 	switch msg.Role {
 	case message.User:
 		return openai.UserMessage(content)
@@ -402,7 +402,7 @@ func (x *xai2Client) convertMessage(msg message.Message) openai.ChatCompletionMe
 		assistantMsg := openai.ChatCompletionAssistantMessageParam{
 			Role: "assistant",
 		}
-		
+
 		hasContent := false
 		if content != "" {
 			assistantMsg.Content = openai.ChatCompletionAssistantMessageParamContentUnion{
@@ -410,7 +410,7 @@ func (x *xai2Client) convertMessage(msg message.Message) openai.ChatCompletionMe
 			}
 			hasContent = true
 		}
-		
+
 		if len(toolCalls) > 0 {
 			assistantMsg.ToolCalls = make([]openai.ChatCompletionMessageToolCallParam, len(toolCalls))
 			for i, tc := range toolCalls {
@@ -425,7 +425,7 @@ func (x *xai2Client) convertMessage(msg message.Message) openai.ChatCompletionMe
 			}
 			hasContent = true
 		}
-		
+
 		// Only add the message if it has content or tool calls
 		if hasContent {
 			return openai.ChatCompletionMessageParamUnion{
@@ -449,7 +449,7 @@ func (x *xai2Client) convertMessage(msg message.Message) openai.ChatCompletionMe
 
 func (x *xai2Client) convertTools(tools []tools.BaseTool) []openai.ChatCompletionToolParam {
 	openaiTools := make([]openai.ChatCompletionToolParam, len(tools))
-	
+
 	for i, tool := range tools {
 		info := tool.Info()
 		openaiTools[i] = openai.ChatCompletionToolParam{
@@ -464,7 +464,7 @@ func (x *xai2Client) convertTools(tools []tools.BaseTool) []openai.ChatCompletio
 			},
 		}
 	}
-	
+
 	return openaiTools
 }
 
@@ -474,7 +474,7 @@ func (x *xai2Client) preparedParams(messages []openai.ChatCompletionMessageParam
 		Messages: messages,
 		Tools:    tools,
 	}
-	
+
 	// For Grok 4 (reasoning model), use MaxCompletionTokens
 	// For other models, use MaxTokens
 	if x.providerOptions.model.CanReason {
@@ -483,25 +483,25 @@ func (x *xai2Client) preparedParams(messages []openai.ChatCompletionMessageParam
 	} else {
 		params.MaxTokens = openai.Int(x.providerOptions.maxTokens)
 	}
-	
+
 	// xAI doesn't support:
 	// - FrequencyPenalty
 	// - PresencePenalty
 	// - Stop sequences
 	// - ResponseFormat (for Grok 4)
-	
+
 	return params
 }
 
 func (x *xai2Client) toProviderResponse(completion openai.ChatCompletion) *ProviderResponse {
 	var content string
 	var toolCalls []message.ToolCall
-	
+
 	if len(completion.Choices) > 0 {
 		content = completion.Choices[0].Message.Content
 		toolCalls = x.toolCalls(completion)
 	}
-	
+
 	return &ProviderResponse{
 		Content:      content,
 		ToolCalls:    toolCalls,
@@ -529,14 +529,14 @@ func (x *xai2Client) toolCalls(completion openai.ChatCompletion) []message.ToolC
 	if len(completion.Choices) == 0 || len(completion.Choices[0].Message.ToolCalls) == 0 {
 		return nil
 	}
-	
+
 	toolCalls := make([]message.ToolCall, len(completion.Choices[0].Message.ToolCalls))
 	for i, tc := range completion.Choices[0].Message.ToolCalls {
 		toolCalls[i] = message.ToolCall{
-			ID:    tc.ID,
-			Name:  tc.Function.Name,
-			Input: tc.Function.Arguments,
-			Type:  "function",
+			ID:       tc.ID,
+			Name:     tc.Function.Name,
+			Input:    tc.Function.Arguments,
+			Type:     "function",
 			Finished: true,
 		}
 	}
@@ -564,13 +564,13 @@ func (x *xai2Client) logDebug(format string, args ...interface{}) {
 	if !x.isDebugMode() {
 		return
 	}
-	
+
 	logFile, err := os.OpenFile("/tmp/xai-stream-debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return
 	}
 	defer logFile.Close()
-	
+
 	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
 	msg := fmt.Sprintf(format, args...)
 	fmt.Fprintf(logFile, "[%s] %s\n", timestamp, msg)
@@ -578,23 +578,23 @@ func (x *xai2Client) logDebug(format string, args ...interface{}) {
 
 func (x *xai2Client) logRequest() {
 	// Log request details
-	
+
 	dir := filepath.Join(os.TempDir(), "opencode")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return
 	}
-	
+
 	timestamp := time.Now().Format("20060102_150405")
 	filename := fmt.Sprintf("xai_%s_%s.json", x.providerOptions.model.ID, timestamp)
 	path := filepath.Join(dir, filename)
-	
+
 	data := map[string]interface{}{
 		"timestamp": time.Now().Format(time.RFC3339),
 		"model":     x.providerOptions.model.ID,
 		"provider":  "xai2",
 		"baseURL":   x.options.baseURL,
 	}
-	
+
 	jsonData, _ := json.MarshalIndent(data, "", "  ")
 	os.WriteFile(path, jsonData, 0644)
 }
@@ -603,16 +603,16 @@ func (x *xai2Client) logError(err error, params openai.ChatCompletionNewParams) 
 	if !x.isDebugMode() {
 		return
 	}
-	
+
 	dir := filepath.Join(os.TempDir(), "opencode", "errors")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return
 	}
-	
+
 	timestamp := time.Now().Format("20060102_150405")
 	filename := fmt.Sprintf("xai_error_%s_%s.json", x.providerOptions.model.ID, timestamp)
 	path := filepath.Join(dir, filename)
-	
+
 	data := map[string]interface{}{
 		"timestamp": time.Now().Format(time.RFC3339),
 		"model":     x.providerOptions.model.ID,
@@ -620,7 +620,7 @@ func (x *xai2Client) logError(err error, params openai.ChatCompletionNewParams) 
 		"error":     err.Error(),
 		"params":    params,
 	}
-	
+
 	jsonData, _ := json.MarshalIndent(data, "", "  ")
 	os.WriteFile(path, jsonData, 0644)
 }

@@ -205,13 +205,13 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 		baseURL = "AWS Bedrock"
 	}
 	request.SetCurrent(string(a.providerOptions.model.Provider), a.providerOptions.model.APIModel, baseURL)
-	
+
 	preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
 	cfg := config.Get()
 	if cfg.Debug {
 		jsonData, _ := json.Marshal(preparedMessages)
 		logging.Debug("Prepared messages", "messages", string(jsonData))
-		
+
 		// Log request info to file
 		a.logRequest()
 	}
@@ -268,7 +268,7 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 		baseURL = "AWS Bedrock"
 	}
 	request.SetCurrent(string(a.providerOptions.model.Provider), a.providerOptions.model.APIModel, baseURL)
-	
+
 	preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
 	cfg := config.Get()
 
@@ -279,10 +279,10 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 			sessionId = sid
 		}
 		jsonData, _ := json.Marshal(preparedMessages)
-		
+
 		// Log request info to file
 		a.logRequest()
-		
+
 		if sessionId != "" {
 			filepath := logging.WriteRequestMessageJson(sessionId, requestSeqId, preparedMessages)
 			logging.Debug("Prepared messages", "filepath", filepath)
@@ -511,13 +511,13 @@ func (a *anthropicClient) logRequest() {
 		debugFile, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if debugFile != nil {
 			defer debugFile.Close()
-			
+
 			// Determine the actual URL being used
 			baseURL := "https://api.anthropic.com"
 			if a.options.useBedrock {
 				baseURL = "AWS Bedrock"
 			}
-			
+
 			fmt.Fprintf(debugFile, "[%s] Provider: %s, Model: %s, URL: %s\n",
 				time.Now().Format("15:04:05"),
 				a.providerOptions.model.Provider,

@@ -45,7 +45,6 @@ func newOpenAIClient(opts providerClientOptions) OpenAIClient {
 	for _, o := range opts.openaiOptions {
 		o(&openaiOpts)
 	}
-	
 
 	openaiClientOptions := []option.RequestOption{}
 	if opts.apiKey != "" {
@@ -207,12 +206,12 @@ func (o *openaiClient) sendWithParams(ctx context.Context, params openai.ChatCom
 		baseURL = o.options.baseURL
 	}
 	request.SetCurrent(string(o.providerOptions.model.Provider), o.providerOptions.model.APIModel, baseURL)
-	
+
 	cfg := config.Get()
 	if cfg.Debug {
 		jsonData, _ := json.Marshal(params)
 		logging.Debug("Prepared messages", "messages", string(jsonData))
-		
+
 		// Log request info to file
 		o.logRequest()
 	}
@@ -281,12 +280,12 @@ func (o *openaiClient) streamWithParams(ctx context.Context, params openai.ChatC
 		baseURL = o.options.baseURL
 	}
 	request.SetCurrent(string(o.providerOptions.model.Provider), o.providerOptions.model.APIModel, baseURL)
-	
+
 	cfg := config.Get()
 	if cfg.Debug {
 		jsonData, _ := json.Marshal(params)
 		logging.Debug("Prepared messages", "messages", string(jsonData))
-		
+
 		// Log request info to file
 		o.logRequest()
 	}
@@ -297,17 +296,17 @@ func (o *openaiClient) streamWithParams(ctx context.Context, params openai.ChatC
 	go func() {
 		for {
 			attempts++
-			
+
 			// Debug logging for xAI
 			if o.options.baseURL == "https://api.x.ai/v1" {
 				debugFile, _ := os.OpenFile("/tmp/xai-stream-debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 				if debugFile != nil {
-					fmt.Fprintf(debugFile, "[%s] OpenAI client: Starting stream attempt %d\n", 
+					fmt.Fprintf(debugFile, "[%s] OpenAI client: Starting stream attempt %d\n",
 						time.Now().Format("2006-01-02 15:04:05.000"), attempts)
 					debugFile.Close()
 				}
 			}
-			
+
 			openaiStream := o.client.Chat.Completions.NewStreaming(
 				ctx,
 				params,
@@ -333,28 +332,28 @@ func (o *openaiClient) streamWithParams(ctx context.Context, params openai.ChatC
 			}
 
 			err := openaiStream.Err()
-			
+
 			// Debug logging for xAI
 			if o.options.baseURL == "https://api.x.ai/v1" {
 				debugFile, _ := os.OpenFile("/tmp/xai-stream-debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 				if debugFile != nil {
 					if err != nil {
-						fmt.Fprintf(debugFile, "[%s] OpenAI client: Stream error: %v\n", 
+						fmt.Fprintf(debugFile, "[%s] OpenAI client: Stream error: %v\n",
 							time.Now().Format("2006-01-02 15:04:05.000"), err)
 						// Try to get more details about the error
 						var apierr *openai.Error
 						if errors.As(err, &apierr) {
-							fmt.Fprintf(debugFile, "[%s] OpenAI client: API Error - Status: %d, Message: %s\n", 
+							fmt.Fprintf(debugFile, "[%s] OpenAI client: API Error - Status: %d, Message: %s\n",
 								time.Now().Format("2006-01-02 15:04:05.000"), apierr.StatusCode, apierr.Message)
 						}
 					} else {
-						fmt.Fprintf(debugFile, "[%s] OpenAI client: Stream completed successfully\n", 
+						fmt.Fprintf(debugFile, "[%s] OpenAI client: Stream completed successfully\n",
 							time.Now().Format("2006-01-02 15:04:05.000"))
 					}
 					debugFile.Close()
 				}
 			}
-			
+
 			if err == nil || errors.Is(err, io.EOF) {
 				// Stream completed successfully
 				finishReason := o.finishReason(string(acc.ChatCompletion.Choices[0].FinishReason))
@@ -381,17 +380,17 @@ func (o *openaiClient) streamWithParams(ctx context.Context, params openai.ChatC
 
 			// If there is an error we are going to see if we can retry the call
 			retry, after, retryErr := o.shouldRetry(attempts, err)
-			
+
 			// Debug logging for xAI
 			if o.options.baseURL == "https://api.x.ai/v1" {
 				debugFile, _ := os.OpenFile("/tmp/xai-stream-debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 				if debugFile != nil {
-					fmt.Fprintf(debugFile, "[%s] OpenAI client: shouldRetry returned: retry=%v, after=%d, retryErr=%v\n", 
+					fmt.Fprintf(debugFile, "[%s] OpenAI client: shouldRetry returned: retry=%v, after=%d, retryErr=%v\n",
 						time.Now().Format("2006-01-02 15:04:05.000"), retry, after, retryErr)
 					debugFile.Close()
 				}
 			}
-			
+
 			if retryErr != nil {
 				request.Clear() // Clear request info on error
 				eventChan <- ProviderEvent{Type: EventError, Error: retryErr}
@@ -521,13 +520,13 @@ func (o *openaiClient) logRequest() {
 		debugFile, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if debugFile != nil {
 			defer debugFile.Close()
-			
+
 			// Determine the actual URL being used
 			baseURL := "https://api.openai.com/v1"
 			if o.options.baseURL != "" {
 				baseURL = o.options.baseURL
 			}
-			
+
 			fmt.Fprintf(debugFile, "[%s] Provider: %s, Model: %s, URL: %s\n",
 				time.Now().Format("15:04:05"),
 				o.providerOptions.model.Provider,

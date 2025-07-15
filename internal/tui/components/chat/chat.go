@@ -39,33 +39,33 @@ func header(width int) string {
 func requestInfo(width int) string {
 	t := theme.CurrentTheme()
 	baseStyle := styles.BaseStyle()
-	
+
 	// Get current request info
 	reqInfo := request.GetCurrent()
-	
+
 	if reqInfo.Provider == "" {
 		return ""
 	}
-	
+
 	// Title
 	title := "Current Request"
 	title = ansi.Truncate(title, width, "…")
-	
+
 	titleView := baseStyle.
 		Width(width).
 		Foreground(t.Primary()).
 		Bold(true).
 		Render(title)
-	
+
 	// Format the request info
 	info := fmt.Sprintf("• %s → %s", reqInfo.Model, reqInfo.URL)
 	info = ansi.Truncate(info, width-2, "…")
-	
+
 	infoView := baseStyle.
 		Width(width).
 		Foreground(t.Text()).
 		Render(info)
-	
+
 	return baseStyle.
 		Width(width).
 		Render(
@@ -180,4 +180,3 @@ func cwd(width int) string {
 		Width(width).
 		Render(cwd)
 }
-

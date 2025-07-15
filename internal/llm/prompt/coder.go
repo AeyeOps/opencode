@@ -290,9 +290,11 @@ func getDefaultGrok4Prompt() string {
 
 ## TOOL CALLING RULES
 1. **USE EXACT TOOL NAMES** - Do not modify, combine, or repeat tool names
-2. **ONE TOOL PER CALL** - Never combine tools like "sourcegraphview"  
+2. **ONE TOOL PER CALL** - Never combine tools like "sourcegraphview"
 3. **NO REPETITION** - Use "edit" not "editeditedit" or any variation
 4. **VERIFY BEFORE CALLING** - Double-check the tool name matches the list above exactly
+5. **VALID JSON PARAMS** - Parameters must be valid JSON with proper braces and commas
+6. **ASK IF UNSURE** - If you are not certain about the tool name or parameters, ask for clarification instead of calling
 
 ## Common Mistakes to Avoid
 ❌ ` + "`sourcegraphview`" + ` - This tool does not exist. Use ` + "`sourcegraph`" + ` then ` + "`view`" + ` separately
@@ -332,10 +334,10 @@ func loadExternalGrokPrompt() string {
 	if err != nil {
 		return baseXAICoderPrompt
 	}
-	
+
 	opencodeDir := filepath.Join(homeDir, ".opencode")
 	promptPath := filepath.Join(opencodeDir, "grok4-system-prompt.md")
-	
+
 	// Check if file exists
 	if _, err := os.Stat(promptPath); os.IsNotExist(err) {
 		// Create directory if needed
@@ -345,14 +347,14 @@ func loadExternalGrokPrompt() string {
 			os.WriteFile(promptPath, []byte(defaultPrompt), 0644)
 		}
 	}
-	
+
 	// Always read from file (don't cache)
 	content, err := os.ReadFile(promptPath)
 	if err != nil {
 		// If we still can't read, return the default
 		return getDefaultGrok4Prompt()
 	}
-	
+
 	return string(content)
 }
 

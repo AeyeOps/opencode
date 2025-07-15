@@ -50,3 +50,7 @@ When fixing issues in scripts or code:
 - Fix the original file and move on
 
 This applies to ALL files: scripts, code, configs, etc. One file, one purpose.
+
+## Documentation Guidelines
+
+- All generated documents unless otherwise instructed should default to be placed in `docs/`

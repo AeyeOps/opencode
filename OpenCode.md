@@ -76,7 +76,7 @@ Untracked files:
   (use "git add <file>..." to include in what will be committed)
 	.claude/
 	OpenCode.md
-	docs-for-grok4-to-review/
+	docs/
 	internal/llm/models/xai2.go
 	internal/llm/provider/xai2.go
 	internal/request/
@@ -108,20 +108,23 @@ b9bedba - Bryan Vaz, 3 weeks ago : feat: add github copilot provider (#230)
           - schema/
             - README.md
             - main.go
-        - docs-for-grok4-to-review/
-          - code-structure.md
-          - dynamic-tool-list-update.md
-          - grok4-critical-issues.md
-          - grok4-prompt-augmentation.md
-          - grok4-system-prompt-template.md
-          - model-selection-flow.md
-          - next-improvements.md
-          - opencode-architecture.md
-          - provider-visibility-issue.md
-          - steve-thoughts.md
-          - timeout-error-analysis.md
-          - troubleshooting-guide.md
-          - xai2-integration-guide.md
+          - docs/
+            - code-structure.md
+            - dynamic-tool-list-update.md
+            - grok4-critical-issues.md
+            - grok4-prompt-augmentation.md
+            - grok4-system-prompt-template.md
+            - logging-architecture-complete.md
+            - model-selection-flow.md
+            - next-improvements.md
+            - opencode-architecture.md
+            - opencode-logging.md
+            - provider-visibility-issue.md
+            - steve-thoughts.md
+            - timeout-error-analysis.md
+            - troubleshooting-guide.md
+            - xai-dynamic-prompt-loading.md
+            - xai2-integration-guide.md
         - go.mod
         - go.sum
         - install

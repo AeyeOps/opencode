@@ -105,6 +105,8 @@ You can configure OpenCode using environment variables:
 | `VERTEXAI_PROJECT`         | For Google Cloud VertexAI (Gemini)                                               |
 | `VERTEXAI_LOCATION`        | For Google Cloud VertexAI (Gemini)                                               |
 | `GROQ_API_KEY`             | For Groq models                                                                  |
+| `XAI_API_KEY`              | For xAI Grok models
+                                |
 | `AWS_ACCESS_KEY_ID`        | For AWS Bedrock (Claude)                                                         |
 | `AWS_SECRET_ACCESS_KEY`    | For AWS Bedrock (Claude)                                                         |
 | `AWS_REGION`               | For AWS Bedrock (Claude)                                                         |
@@ -255,6 +257,37 @@ OpenCode supports a variety of AI models from different providers:
 - QWEN QWQ-32b
 - Deepseek R1 distill Llama 70b
 - Llama 3.3 70b Versatile
+
+### XAI2
+
+OpenCode includes a standalone provider for xAI's Grok models. Set `XAI_API_KEY`
+in your environment or configuration:
+
+```json
+{
+  "providers": {
+    "xai2": {
+      "apiKey": "xai-YOUR-API-KEY",
+      "disabled": false
+    }
+  },
+  "agents": {
+    "coder": {
+      "model": "xai2.grok-4"
+    }
+  }
+}
+```
+
+Supported models:
+
+- Grok-4 (0709)
+- Grok-3
+- Grok-3 Mini
+- Grok-3 Fast
+- Grok-3 Mini Fast
+- Grok-2 Vision
+- Grok-2 Image
 
 ### Azure OpenAI
 

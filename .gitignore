@@ -47,4 +47,7 @@ opencode
 opencode.md
 
 # Repomix output
-repomix-output.xml
+repomix-*.xml
+
+data-and-logs/
+logs/

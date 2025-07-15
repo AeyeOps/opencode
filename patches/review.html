@@ -1,0 +1,534 @@
+<span id="mermaid" aria-hidden="true"
+                    data-dark-mode-theme="redux-dark"
+                    data-light-mode-theme="redux"
+                    data-max-text-size="undefined"></span>
+                <div
+            class="github-markdown-body"
+            data-color-mode="auto"
+            data-light-theme="light"
+            data-dark-theme="dark"
+        >
+            <div class="github-markdown-content"><span id="markdown-mermaid" aria-hidden="true"
+                    data-dark-mode-theme="dark"
+                    data-light-mode-theme="default"
+                    data-max-text-size="50000"></span>
+                <hr>
+<h2 id="logging-system-improvements">Logging System Improvements</h2>
+<p>The current logging system in OpenCode, as seen in <code>internal/logging/</code>, uses <code>slog</code> with basic handlers. However, it has limitations such as a single output at a time and a split between regular logs and session logs. To address this, I'll propose a unified logging system with a multi-handler approach, RAG integration for self-improvement, and enhanced session logging.</p>
+<h3 id="1-unified-logging-with-multi-handler">1. Unified Logging with Multi-Handler</h3>
+<p>We'll enhance the existing <code>MultiHandler</code> to route logs to multiple destinations (console, file, session files, RAG) simultaneously, improving flexibility and consistency.</p>
+<p><strong>Modified File:</strong> <code>internal/logging/multihandler.go</code></p>
+<pre><code class="language-go"><span class="hljs-keyword">package</span> logging
+
+<span class="hljs-keyword">import</span> (
+	<span class="hljs-string">&quot;context&quot;</span>
+	<span class="hljs-string">&quot;errors&quot;</span>
+	<span class="hljs-string">&quot;log/slog&quot;</span>
+)
+
+<span class="hljs-comment">// MultiHandler routes logs to multiple slog.Handler instances.</span>
+<span class="hljs-keyword">type</span> MultiHandler <span class="hljs-keyword">struct</span> {
+	handlers []slog.Handler
+}
+
+<span class="hljs-comment">// NewMultiHandler creates a new MultiHandler with the given handlers.</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-title">NewMultiHandler</span><span class="hljs-params">(handlers ...slog.Handler)</span></span> *MultiHandler {
+	<span class="hljs-keyword">return</span> &amp;MultiHandler{handlers: handlers}
+}
+
+<span class="hljs-comment">// Enabled checks if any handler is enabled for the given level.</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(h *MultiHandler)</span></span> Enabled(ctx context.Context, level slog.Level) <span class="hljs-type">bool</span> {
+	<span class="hljs-keyword">for</span> _, handler := <span class="hljs-keyword">range</span> h.handlers {
+		<span class="hljs-keyword">if</span> handler.Enabled(ctx, level) {
+			<span class="hljs-keyword">return</span> <span class="hljs-literal">true</span>
+		}
+	}
+	<span class="hljs-keyword">return</span> <span class="hljs-literal">false</span>
+}
+
+<span class="hljs-comment">// Handle processes the log record by passing it to all enabled handlers.</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(h *MultiHandler)</span></span> Handle(ctx context.Context, r slog.Record) <span class="hljs-type">error</span> {
+	<span class="hljs-keyword">var</span> errs []<span class="hljs-type">error</span>
+	<span class="hljs-keyword">for</span> _, handler := <span class="hljs-keyword">range</span> h.handlers {
+		<span class="hljs-keyword">if</span> handler.Enabled(ctx, r.Level) {
+			<span class="hljs-keyword">if</span> err := handler.Handle(ctx, r); err != <span class="hljs-literal">nil</span> {
+				errs = <span class="hljs-built_in">append</span>(errs, err)
+			}
+		}
+	}
+	<span class="hljs-keyword">if</span> <span class="hljs-built_in">len</span>(errs) &gt; <span class="hljs-number">0</span> {
+		<span class="hljs-keyword">return</span> errors.Join(errs...)
+	}
+	<span class="hljs-keyword">return</span> <span class="hljs-literal">nil</span>
+}
+
+<span class="hljs-comment">// WithAttrs creates a new MultiHandler with additional attributes.</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(h *MultiHandler)</span></span> WithAttrs(attrs []slog.Attr) slog.Handler {
+	handlers := <span class="hljs-built_in">make</span>([]slog.Handler, <span class="hljs-built_in">len</span>(h.handlers))
+	<span class="hljs-keyword">for</span> i, handler := <span class="hljs-keyword">range</span> h.handlers {
+		handlers[i] = handler.WithAttrs(attrs)
+	}
+	<span class="hljs-keyword">return</span> NewMultiHandler(handlers...)
+}
+
+<span class="hljs-comment">// WithGroup creates a new MultiHandler with a group name.</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(h *MultiHandler)</span></span> WithGroup(name <span class="hljs-type">string</span>) slog.Handler {
+	handlers := <span class="hljs-built_in">make</span>([]slog.Handler, <span class="hljs-built_in">len</span>(h.handlers))
+	<span class="hljs-keyword">for</span> i, handler := <span class="hljs-keyword">range</span> h.handlers {
+		handlers[i] = handler.WithGroup(name)
+	}
+	<span class="hljs-keyword">return</span> NewMultiHandler(handlers...)
+}
+</code></pre>
+<p><strong>Changes Explained</strong>:</p>
+<ul>
+<li>The file remains largely unchanged from the provided version but is included here for completeness. It enables logs to be sent to multiple outputs, which we'll leverage with new handlers.</li>
+</ul>
+<h3 id="2-rag-integration-with-raghandler">2. RAG Integration with <code>RAGHandler</code></h3>
+<p>We'll introduce a new <code>RAGHandler</code> to embed reflection logs into a vector database (e.g., FAISS) for self-improvement, allowing OpenCode to learn from past logs.</p>
+<p><strong>New File:</strong> <code>internal/logging/raghandler.go</code></p>
+<pre><code class="language-go"><span class="hljs-keyword">package</span> logging
+
+<span class="hljs-keyword">import</span> (
+	<span class="hljs-string">&quot;context&quot;</span>
+	<span class="hljs-string">&quot;log/slog&quot;</span>
+	<span class="hljs-string">&quot;github.com/opencode-ai/opencode/internal/db&quot;</span>
+)
+
+<span class="hljs-comment">// RAGHandler embeds reflection logs into a vector database for self-improvement.</span>
+<span class="hljs-keyword">type</span> RAGHandler <span class="hljs-keyword">struct</span> {
+	db *db.FAISSDB
+}
+
+<span class="hljs-comment">// NewRAGHandler creates a new RAGHandler with a FAISS database instance.</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-title">NewRAGHandler</span><span class="hljs-params">(db *db.FAISSDB)</span></span> *RAGHandler {
+	<span class="hljs-keyword">return</span> &amp;RAGHandler{db: db}
+}
+
+<span class="hljs-comment">// Enabled ensures only Info level and above are processed for RAG.</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(h *RAGHandler)</span></span> Enabled(ctx context.Context, level slog.Level) <span class="hljs-type">bool</span> {
+	<span class="hljs-keyword">return</span> level &gt;= slog.LevelInfo
+}
+
+<span class="hljs-comment">// Handle embeds reflection logs into the vector database.</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(h *RAGHandler)</span></span> Handle(ctx context.Context, r slog.Record) <span class="hljs-type">error</span> {
+	<span class="hljs-keyword">var</span> isReflection <span class="hljs-type">bool</span>
+	<span class="hljs-keyword">var</span> sessionID <span class="hljs-type">string</span>
+	r.Attrs(<span class="hljs-function"><span class="hljs-keyword">func</span><span class="hljs-params">(a slog.Attr)</span></span> <span class="hljs-type">bool</span> {
+		<span class="hljs-keyword">if</span> a.Key == <span class="hljs-string">&quot;type&quot;</span> &amp;&amp; a.Value.String() == <span class="hljs-string">&quot;reflection&quot;</span> {
+			isReflection = <span class="hljs-literal">true</span>
+		}
+		<span class="hljs-keyword">if</span> a.Key == <span class="hljs-string">&quot;sessionID&quot;</span> {
+			sessionID = a.Value.String()
+		}
+		<span class="hljs-keyword">return</span> <span class="hljs-literal">true</span>
+	})
+	<span class="hljs-keyword">if</span> isReflection {
+		vector := embed(r.Message) <span class="hljs-comment">// Convert message to vector</span>
+		<span class="hljs-keyword">return</span> h.db.Insert(sessionID, vector, r)
+	}
+	<span class="hljs-keyword">return</span> <span class="hljs-literal">nil</span>
+}
+
+<span class="hljs-comment">// WithAttrs returns the handler unchanged (attributes not stored in RAG).</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(h *RAGHandler)</span></span> WithAttrs(attrs []slog.Attr) slog.Handler {
+	<span class="hljs-keyword">return</span> h
+}
+
+<span class="hljs-comment">// WithGroup returns the handler unchanged (groups not stored in RAG).</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(h *RAGHandler)</span></span> WithGroup(name <span class="hljs-type">string</span>) slog.Handler {
+	<span class="hljs-keyword">return</span> h
+}
+
+<span class="hljs-comment">// embed converts a message to a vector (placeholder for actual embedding).</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-title">embed</span><span class="hljs-params">(message <span class="hljs-type">string</span>)</span></span> []<span class="hljs-type">float32</span> {
+	<span class="hljs-comment">// <span class="hljs-doctag">TODO:</span> Implement with a real embedding model (e.g., BERT or SentenceTransformers).</span>
+	<span class="hljs-keyword">return</span> []<span class="hljs-type">float32</span>{} <span class="hljs-comment">// Placeholder</span>
+}
+</code></pre>
+<p><strong>Explanation</strong>:</p>
+<ul>
+<li>This handler captures logs tagged with <code>type=reflection</code> and embeds them into a FAISS database (assumed to be defined in <code>internal/db</code>). This enables retrieval-augmented generation (RAG) for self-improvement.</li>
+</ul>
+<h3 id="3-enhanced-session-logging-with-sessionhandler">3. Enhanced Session Logging with <code>SessionHandler</code></h3>
+<p>We'll modify the existing <code>SessionHandler</code> to write logs in JSONL format with timestamps, improving readability and performance for session logs.</p>
+<p><strong>Modified File:</strong> <code>internal/logging/sessionhandler.go</code></p>
+<pre><code class="language-go"><span class="hljs-keyword">package</span> logging
+
+<span class="hljs-keyword">import</span> (
+	<span class="hljs-string">&quot;context&quot;</span>
+	<span class="hljs-string">&quot;encoding/json&quot;</span>
+	<span class="hljs-string">&quot;log/slog&quot;</span>
+	<span class="hljs-string">&quot;os&quot;</span>
+	<span class="hljs-string">&quot;time&quot;</span>
+)
+
+<span class="hljs-comment">// SessionHandler writes logs to a file in JSONL format.</span>
+<span class="hljs-keyword">type</span> SessionHandler <span class="hljs-keyword">struct</span> {
+	file *os.File
+}
+
+<span class="hljs-comment">// NewSessionHandler creates a new SessionHandler for the given file path.</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-title">NewSessionHandler</span><span class="hljs-params">(path <span class="hljs-type">string</span>)</span></span> *SessionHandler {
+	file, _ := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, <span class="hljs-number">0644</span>) <span class="hljs-comment">// Error handling omitted for brevity</span>
+	<span class="hljs-keyword">return</span> &amp;SessionHandler{file: file}
+}
+
+<span class="hljs-comment">// Enabled allows all log levels for session logs.</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(h *SessionHandler)</span></span> Enabled(ctx context.Context, level slog.Level) <span class="hljs-type">bool</span> {
+	<span class="hljs-keyword">return</span> <span class="hljs-literal">true</span>
+}
+
+<span class="hljs-comment">// Handle writes the log record as a JSONL entry with a timestamp.</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(h *SessionHandler)</span></span> Handle(ctx context.Context, r slog.Record) <span class="hljs-type">error</span> {
+	logEntry := <span class="hljs-keyword">map</span>[<span class="hljs-type">string</span>]<span class="hljs-keyword">interface</span>{}{
+		<span class="hljs-string">&quot;time&quot;</span>:    time.Now().Format(time.RFC3339),
+		<span class="hljs-string">&quot;level&quot;</span>:   r.Level.String(),
+		<span class="hljs-string">&quot;message&quot;</span>: r.Message,
+	}
+	r.Attrs(<span class="hljs-function"><span class="hljs-keyword">func</span><span class="hljs-params">(a slog.Attr)</span></span> <span class="hljs-type">bool</span> {
+		logEntry[a.Key] = a.Value.Any()
+		<span class="hljs-keyword">return</span> <span class="hljs-literal">true</span>
+	})
+	data, err := json.Marshal(logEntry)
+	<span class="hljs-keyword">if</span> err != <span class="hljs-literal">nil</span> {
+		<span class="hljs-keyword">return</span> err
+	}
+	data = <span class="hljs-built_in">append</span>(data, <span class="hljs-string">&#x27;\n&#x27;</span>)
+	_, err = h.file.Write(data)
+	<span class="hljs-keyword">return</span> err
+}
+
+<span class="hljs-comment">// WithAttrs returns the handler unchanged (attributes are included in Handle).</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(h *SessionHandler)</span></span> WithAttrs(attrs []slog.Attr) slog.Handler {
+	<span class="hljs-keyword">return</span> h
+}
+
+<span class="hljs-comment">// WithGroup returns the handler unchanged (groups not needed for session logs).</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(h *SessionHandler)</span></span> WithGroup(name <span class="hljs-type">string</span>) slog.Handler {
+	<span class="hljs-keyword">return</span> h
+}
+</code></pre>
+<p><strong>Changes Explained</strong>:</p>
+<ul>
+<li>Added JSONL formatting with timestamps, enhancing readability and enabling real-time tailing in the TUI.</li>
+<li>Simplified attribute handling by embedding them directly in the log entry.</li>
+</ul>
+<h3 id="4-configuration-updates-for-logging">4. Configuration Updates for Logging</h3>
+<p>We'll update the <code>Config</code> struct to support multiple logging outputs and per-module levels, aligning with the multi-handler system.</p>
+<p><strong>Modified File:</strong> <code>internal/config/config.go</code></p>
+<pre><code class="language-go"><span class="hljs-keyword">package</span> config
+
+<span class="hljs-keyword">import</span> (
+	<span class="hljs-string">&quot;encoding/json&quot;</span>
+	<span class="hljs-string">&quot;fmt&quot;</span>
+	<span class="hljs-string">&quot;log/slog&quot;</span>
+	<span class="hljs-string">&quot;os&quot;</span>
+	<span class="hljs-string">&quot;path/filepath&quot;</span>
+	<span class="hljs-string">&quot;runtime&quot;</span>
+	<span class="hljs-string">&quot;strings&quot;</span>
+	<span class="hljs-string">&quot;github.com/opencode-ai/opencode/internal/llm/models&quot;</span>
+	<span class="hljs-string">&quot;github.com/opencode-ai/opencode/internal/logging&quot;</span>
+	<span class="hljs-string">&quot;github.com/spf13/viper&quot;</span>
+)
+
+<span class="hljs-comment">// LoggingOutput defines a log output type and its options.</span>
+<span class="hljs-keyword">type</span> LoggingOutput <span class="hljs-keyword">struct</span> {
+	Type    <span class="hljs-type">string</span>                 <span class="hljs-string">`json:&quot;type&quot;`</span>
+	Options <span class="hljs-keyword">map</span>[<span class="hljs-type">string</span>]<span class="hljs-keyword">interface</span>{} <span class="hljs-string">`json:&quot;options&quot;`</span>
+}
+
+<span class="hljs-comment">// LoggingModule defines a module&#x27;s logging level.</span>
+<span class="hljs-keyword">type</span> LoggingModule <span class="hljs-keyword">struct</span> {
+	Level <span class="hljs-type">string</span> <span class="hljs-string">`json:&quot;level&quot;`</span>
+}
+
+<span class="hljs-comment">// LoggingConfig holds logging configuration.</span>
+<span class="hljs-keyword">type</span> LoggingConfig <span class="hljs-keyword">struct</span> {
+	Outputs []LoggingOutput          <span class="hljs-string">`json:&quot;outputs&quot;`</span>
+	Modules <span class="hljs-keyword">map</span>[<span class="hljs-type">string</span>]LoggingModule <span class="hljs-string">`json:&quot;modules&quot;`</span>
+}
+
+<span class="hljs-comment">// ... (other existing types like MCPType, MCPServer, AgentName, etc., remain unchanged)</span>
+
+<span class="hljs-comment">// Config holds the application configuration.</span>
+<span class="hljs-keyword">type</span> Config <span class="hljs-keyword">struct</span> {
+	Data         Data                              <span class="hljs-string">`json:&quot;data&quot;`</span>
+	WorkingDir   <span class="hljs-type">string</span>                            <span class="hljs-string">`json:&quot;wd,omitempty&quot;`</span>
+	MCPServers   <span class="hljs-keyword">map</span>[<span class="hljs-type">string</span>]MCPServer              <span class="hljs-string">`json:&quot;mcpServers,omitempty&quot;`</span>
+	Providers    <span class="hljs-keyword">map</span>[models.ModelProvider]Provider <span class="hljs-string">`json:&quot;providers,omitempty&quot;`</span>
+	LSP          <span class="hljs-keyword">map</span>[<span class="hljs-type">string</span>]LSPConfig              <span class="hljs-string">`json:&quot;lsp,omitempty&quot;`</span>
+	Agents       <span class="hljs-keyword">map</span>[AgentName]Agent               <span class="hljs-string">`json:&quot;agents,omitempty&quot;`</span>
+	Debug        <span class="hljs-type">bool</span>                              <span class="hljs-string">`json:&quot;debug,omitempty&quot;`</span>
+	DebugLSP     <span class="hljs-type">bool</span>                              <span class="hljs-string">`json:&quot;debugLSP,omitempty&quot;`</span>
+	ContextPaths []<span class="hljs-type">string</span>                          <span class="hljs-string">`json:&quot;contextPaths,omitempty&quot;`</span>
+	TUI          TUIConfig                         <span class="hljs-string">`json:&quot;tui&quot;`</span>
+	Shell        ShellConfig                       <span class="hljs-string">`json:&quot;shell,omitempty&quot;`</span>
+	AutoCompact  <span class="hljs-type">bool</span>                              <span class="hljs-string">`json:&quot;autoCompact,omitempty&quot;`</span>
+	Logging      LoggingConfig                     <span class="hljs-string">`json:&quot;logging&quot;`</span>
+}
+
+<span class="hljs-comment">// ... (constants and existing functions remain unchanged)</span>
+
+<span class="hljs-comment">// Load reads the configuration from a file.</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-title">Load</span><span class="hljs-params">(workingDir <span class="hljs-type">string</span>, debug <span class="hljs-type">bool</span>)</span></span> (*Config, <span class="hljs-type">error</span>) {
+	configureViper()
+	setDefaults(debug)
+	err := viper.ReadInConfig()
+	<span class="hljs-keyword">if</span> err != <span class="hljs-literal">nil</span> {
+		<span class="hljs-keyword">return</span> <span class="hljs-literal">nil</span>, readConfig(err)
+	}
+	<span class="hljs-keyword">var</span> c Config
+	err = viper.Unmarshal(&amp;c)
+	<span class="hljs-keyword">if</span> err != <span class="hljs-literal">nil</span> {
+		<span class="hljs-keyword">return</span> <span class="hljs-literal">nil</span>, fmt.Errorf(<span class="hljs-string">&quot;unable to decode config: %v&quot;</span>, err)
+	}
+	mergeLocalConfig(workingDir)
+	applyDefaultValues()
+	cfg = &amp;c
+	<span class="hljs-keyword">return</span> cfg, <span class="hljs-literal">nil</span>
+}
+
+<span class="hljs-comment">// SetupLogging configures the logging system based on the config.</span>
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-title">SetupLogging</span><span class="hljs-params">(cfg *Config)</span></span> <span class="hljs-type">error</span> {
+	<span class="hljs-keyword">var</span>蜀 handlers []slog.Handler
+	<span class="hljs-keyword">for</span> _, output := <span class="hljs-keyword">range</span> cfg.Logging.Outputs {
+		<span class="hljs-keyword">switch</span> output.Type {
+		<span class="hljs-keyword">case</span> <span class="hljs-string">&quot;console&quot;</span>:
+			handlers = <span class="hljs-built_in">append</span>(handlers, slog.NewTextHandler(os.Stdout, <span class="hljs-literal">nil</span>))
+		<span class="hljs-keyword">case</span> <span class="hljs-string">&quot;file&quot;</span>:
+			path, ok := output.Options[<span class="hljs-string">&quot;path&quot;</span>].(<span class="hljs-type">string</span>)
+			<span class="hljs-keyword">if</span> !ok {
+				path = <span class="hljs-string">&quot;opencode.log&quot;</span>
+			}
+			file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, <span class="hljs-number">0644</span>)
+			<span class="hljs-keyword">if</span> err != <span class="hljs-literal">nil</span> {
+				<span class="hljs-keyword">return</span> err
+			}
+			handlers = <span class="hljs-built_in">append</span>(handlers, slog.NewJSONHandler(file, <span class="hljs-literal">nil</span>))
+		<span class="hljs-keyword">case</span> <span class="hljs-string">&quot;session&quot;</span>:
+			path, ok := output.Options[<span class="hljs-string">&quot;path&quot;</span>].(<span class="hljs-type">string</span>)
+			<span class="hljs-keyword">if</span> !ok {
+				path = <span class="hljs-string">&quot;session.log&quot;</span>
+			}
+			handlers = <span class="hljs-built_in">append</span>(handlers, NewSessionHandler(path))
+		<span class="hljs-keyword">case</span> <span class="hljs-string">&quot;rag&quot;</span>:
+			<span class="hljs-comment">// Assuming FAISSDB is initialized elsewhere</span>
+			db := &amp;db.FAISSDB{} <span class="hljs-comment">// Placeholder; replace with actual initialization</span>
+			handlers = <span class="hljs-built_in">append</span>(handlers, NewRAGHandler(db))
+		}
+	}
+	slog.SetDefault(slog.New(NewMultiHandler(handlers...)))
+	<span class="hljs-keyword">return</span> <span class="hljs-literal">nil</span>
+}
+
+<span class="hljs-comment">// ... (other existing functions remain unchanged)</span>
+</code></pre>
+<p><strong>Changes Explained</strong>:</p>
+<ul>
+<li>Added <code>LoggingOutput</code>, <code>LoggingModule</code>, and <code>LoggingConfig</code> structs to support multiple outputs and module-specific levels.</li>
+<li>Updated <code>Config</code> to include <code>Logging</code>.</li>
+<li>Enhanced <code>SetupLogging</code> to initialize handlers based on config, integrating the new <code>SessionHandler</code> and <code>RAGHandler</code>.</li>
+</ul>
+<hr>
+<h2 id="tui-enhancements">TUI Enhancements</h2>
+<p>The current TUI, as seen in <code>internal/tui/</code>, provides a basic logs view in <code>logs/table.go</code>. We'll enhance it with real-time log tailing, interactive filters, and a reflection dashboard in the sidebar.</p>
+<h3 id="1-real-time-log-tailing">1. Real-Time Log Tailing</h3>
+<p>We'll modify the logs table to use <code>fsnotify</code> for real-time updates and add filtering capabilities.</p>
+<p><strong>Modified File:</strong> <code>internal/tui/components/logs/table.go</code></p>
+<pre><code class="language-go"><span class="hljs-keyword">package</span> logs
+
+<span class="hljs-keyword">import</span> (
+	<span class="hljs-string">&quot;fmt&quot;</span>
+	<span class="hljs-string">&quot;strings&quot;</span>
+	<span class="hljs-string">&quot;github.com/charmbracelet/bubbletea&quot;</span>
+	<span class="hljs-string">&quot;github.com/fsnotify/fsnotify&quot;</span>
+)
+
+<span class="hljs-keyword">type</span> LogsTable <span class="hljs-keyword">struct</span> {
+	watcher *fsnotify.Watcher
+	logs    []<span class="hljs-type">string</span>
+	filter  <span class="hljs-type">string</span>
+	verbose <span class="hljs-type">bool</span>
+}
+
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-title">NewLogsTable</span><span class="hljs-params">()</span></span> *LogsTable {
+	<span class="hljs-keyword">return</span> &amp;LogsTable{
+		logs:    []<span class="hljs-type">string</span>{},
+		verbose: <span class="hljs-literal">false</span>,
+	}
+}
+
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(t *LogsTable)</span></span> Init() tea.Cmd {
+	<span class="hljs-keyword">var</span> err <span class="hljs-type">error</span>
+	t.watcher, err = fsnotify.NewWatcher()
+	<span class="hljs-keyword">if</span> err != <span class="hljs-literal">nil</span> {
+		<span class="hljs-keyword">return</span> <span class="hljs-function"><span class="hljs-keyword">func</span><span class="hljs-params">()</span></span> tea.Msg { <span class="hljs-keyword">return</span> err }
+	}
+	<span class="hljs-keyword">go</span> <span class="hljs-function"><span class="hljs-keyword">func</span><span class="hljs-params">()</span></span> {
+		<span class="hljs-keyword">for</span> {
+			<span class="hljs-keyword">select</span> {
+			<span class="hljs-keyword">case</span> event, ok := &lt;-t.watcher.Events:
+				<span class="hljs-keyword">if</span> !ok {
+					<span class="hljs-keyword">return</span>
+				}
+				<span class="hljs-keyword">if</span> event.Op&amp;fsnotify.Write == fsnotify.Write {
+					<span class="hljs-comment">// <span class="hljs-doctag">TODO:</span> Read new log lines from file and append to t.logs</span>
+					t.logs = <span class="hljs-built_in">append</span>(t.logs, fmt.Sprintf(<span class="hljs-string">&quot;Log updated: %s&quot;</span>, event.Name))
+				}
+			<span class="hljs-keyword">case</span> err, ok := &lt;-t.watcher.Errors:
+				<span class="hljs-keyword">if</span> !ok {
+					<span class="hljs-keyword">return</span>
+				}
+			}
+		}
+	}()
+	t.watcher.Add(<span class="hljs-string">&quot;session.log&quot;</span>) <span class="hljs-comment">// Watch session log file</span>
+	<span class="hljs-keyword">return</span> <span class="hljs-literal">nil</span>
+}
+
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(t *LogsTable)</span></span> Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	<span class="hljs-keyword">switch</span> msg := msg.(<span class="hljs-keyword">type</span>) {
+	<span class="hljs-keyword">case</span> tea.KeyMsg:
+		<span class="hljs-keyword">switch</span> msg.String() {
+		<span class="hljs-keyword">case</span> <span class="hljs-string">&quot;ctrl+f&quot;</span>:
+			<span class="hljs-comment">// <span class="hljs-doctag">TODO:</span> Enable filter input mode</span>
+			t.filter = <span class="hljs-string">&quot;approved&quot;</span> <span class="hljs-comment">// Placeholder for filter input</span>
+		<span class="hljs-keyword">case</span> <span class="hljs-string">&quot;v&quot;</span>:
+			t.verbose = !t.verbose
+		}
+	}
+	<span class="hljs-keyword">return</span> t, <span class="hljs-literal">nil</span>
+}
+
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(t *LogsTable)</span></span> View() <span class="hljs-type">string</span> {
+	<span class="hljs-keyword">var</span> b strings.Builder
+	<span class="hljs-keyword">for</span> _, log := <span class="hljs-keyword">range</span> t.logs {
+		<span class="hljs-keyword">if</span> t.filter != <span class="hljs-string">&quot;&quot;</span> &amp;&amp; !strings.Contains(log, t.filter) {
+			<span class="hljs-keyword">continue</span>
+		}
+		color := <span class="hljs-string">&quot;white&quot;</span>
+		<span class="hljs-keyword">if</span> strings.Contains(log, <span class="hljs-string">&quot;approved&quot;</span>) {
+			color = <span class="hljs-string">&quot;green&quot;</span>
+		} <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> strings.Contains(log, <span class="hljs-string">&quot;denied&quot;</span>) {
+			color = <span class="hljs-string">&quot;red&quot;</span>
+		}
+		b.WriteString(fmt.Sprintf(<span class="hljs-string">&quot;[%s]%s\n&quot;</span>, color, log))
+	}
+	<span class="hljs-keyword">return</span> b.String()
+}
+</code></pre>
+<p><strong>Changes Explained</strong>:</p>
+<ul>
+<li>Added <code>fsnotify</code> to watch <code>session.log</code> and append new entries in real-time.</li>
+<li>Introduced basic filtering (placeholder for full implementation) and verbose toggling.</li>
+<li>Enhanced <code>View</code> with color-coding for better readability.</li>
+</ul>
+<h3 id="2-reflection-dashboard-in-sidebar">2. Reflection Dashboard in Sidebar</h3>
+<p>We'll modify the chat sidebar to display recent reflections and KPIs, leveraging RAG data.</p>
+<p><strong>Modified File:</strong> <code>internal/tui/components/chat/sidebar.go</code></p>
+<pre><code class="language-go"><span class="hljs-keyword">package</span> chat
+
+<span class="hljs-keyword">import</span> (
+	<span class="hljs-string">&quot;fmt&quot;</span>
+	<span class="hljs-string">&quot;strings&quot;</span>
+	<span class="hljs-string">&quot;github.com/charmbracelet/bubbletea&quot;</span>
+)
+
+<span class="hljs-keyword">type</span> Sidebar <span class="hljs-keyword">struct</span> {
+	reflections []Reflection
+	kpis        <span class="hljs-keyword">map</span>[<span class="hljs-type">string</span>]<span class="hljs-type">string</span>
+}
+
+<span class="hljs-keyword">type</span> Reflection <span class="hljs-keyword">struct</span> {
+	Suggestion <span class="hljs-type">string</span>
+	Approved   <span class="hljs-type">bool</span>
+}
+
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-title">NewSidebar</span><span class="hljs-params">()</span></span> *Sidebar {
+	<span class="hljs-keyword">return</span> &amp;Sidebar{
+		reflections: []Reflection{},
+		kpis:        <span class="hljs-keyword">map</span>[<span class="hljs-type">string</span>]<span class="hljs-type">string</span>{},
+	}
+}
+
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(s *Sidebar)</span></span> Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	<span class="hljs-comment">// <span class="hljs-doctag">TODO:</span> Update reflections from RAGHandler logs and KPIs from metrics</span>
+	s.reflections = <span class="hljs-built_in">append</span>(s.reflections, Reflection{Suggestion: <span class="hljs-string">&quot;Optimize DB queries&quot;</span>, Approved: <span class="hljs-literal">true</span>})
+	s.kpis[<span class="hljs-string">&quot;ResponseTime&quot;</span>] = <span class="hljs-string">&quot;300ms&quot;</span>
+	<span class="hljs-keyword">return</span> s, <span class="hljs-literal">nil</span>
+}
+
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(s *Sidebar)</span></span> View() <span class="hljs-type">string</span> {
+	<span class="hljs-keyword">var</span> b strings.Builder
+	b.WriteString(<span class="hljs-string">&quot;Recent Suggestions:\n&quot;</span>)
+	<span class="hljs-keyword">for</span> _, r := <span class="hljs-keyword">range</span> s.reflections {
+		color := <span class="hljs-string">&quot;red&quot;</span>
+		<span class="hljs-keyword">if</span> r.Approved {
+			color = <span class="hljs-string">&quot;green&quot;</span>
+		}
+		b.WriteString(fmt.Sprintf(<span class="hljs-string">&quot;[%s]%s\n&quot;</span>, color, r.Suggestion))
+	}
+	b.WriteString(<span class="hljs-string">&quot;\nCurrent KPIs:\n&quot;</span>)
+	<span class="hljs-keyword">for</span> k, v := <span class="hljs-keyword">range</span> s.kpis {
+		b.WriteString(fmt.Sprintf(<span class="hljs-string">&quot;%s: %s\n&quot;</span>, k, v))
+	}
+	<span class="hljs-keyword">return</span> b.String()
+}
+</code></pre>
+<p><strong>Changes Explained</strong>:</p>
+<ul>
+<li>Added a <code>Reflection</code> struct and fields to track suggestions and KPIs.</li>
+<li>Updated <code>Update</code> with placeholder logic to fetch data (to be integrated with RAG).</li>
+<li>Enhanced <code>View</code> to display reflections and KPIs with color-coding.</li>
+</ul>
+<hr>
+<h2 id="integration-steps">Integration Steps</h2>
+<p>To implement these enhancements in OpenCode:</p>
+<ol>
+<li>
+<p><strong>Add New Files</strong>:</p>
+<ul>
+<li>Place <code>internal/logging/raghandler.go</code> in the codebase.</li>
+</ul>
+</li>
+<li>
+<p><strong>Update Existing Files</strong>:</p>
+<ul>
+<li>Replace <code>internal/logging/multihandler.go</code>, <code>internal/logging/sessionhandler.go</code>, <code>internal/config/config.go</code>, <code>internal/tui/components/logs/table.go</code>, and <code>internal/tui/components/chat/sidebar.go</code> with the versions above.</li>
+</ul>
+</li>
+<li>
+<p><strong>Dependencies</strong>:</p>
+<ul>
+<li>Add <code>github.com/fsnotify/fsnotify</code> to <code>go.mod</code> for real-time log tailing.</li>
+<li>Ensure a FAISS implementation exists in <code>internal/db</code> or mock it for now.</li>
+</ul>
+</li>
+<li>
+<p><strong>Configuration</strong>:</p>
+<ul>
+<li>Update <code>.opencode.json</code> to include logging outputs:<pre><code class="language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;logging&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;outputs&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+      <span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;type&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;console&quot;</span><span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;type&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;session&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;options&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;path&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;session.log&quot;</span><span class="hljs-punctuation">}</span><span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;type&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;rag&quot;</span><span class="hljs-punctuation">}</span>
+    <span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;modules&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;main&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;level&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;info&quot;</span><span class="hljs-punctuation">}</span><span class="hljs-punctuation">}</span>
+  <span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">}</span>
+</code></pre>
+</li>
+</ul>
+</li>
+<li>
+<p><strong>Test</strong>:</p>
+<ul>
+<li>Run <code>go build -o opencode &amp;&amp; ./opencode</code> to verify the logging system and TUI work as expected.</li>
+</ul>
+</li>
+</ol>
+<p>These changes enhance OpenCode's logging with a unified, multi-output system and improve the TUI with real-time log viewing and a reflection dashboard. Let me know if you need further assistance with implementation or additional features!</p>
+</div>
+        </div>

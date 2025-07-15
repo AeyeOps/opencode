@@ -16,10 +16,15 @@
     "go.sum",
     "Makefile",
     ".goreleaser.yaml",
+    ".goreleaser.yml",
     "**/*.json",
     "**/*.yaml",
     "**/*.yml",
-    "**/*.sh"
+    "**/*.sh",
+    "**/*.sql",
+    ".gitignore",
+    "LICENSE",
+    "sqlc.yaml"
   ],
   "ignore": {
     "useGitignore": true,
@@ -37,7 +42,6 @@
       "**/.opencode/**",
       "**/testdata/**",
       "**/mocks/**",
-      "**/*_test.go",
       "**/docs/api/**",
       "**/*.png",
       "**/*.jpg",

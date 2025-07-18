@@ -53,4 +53,4 @@ This applies to ALL files: scripts, code, configs, etc. One file, one purpose.
 
 ## Documentation Guidelines
 
-- All generated documents, unless otherwise instructed, should be placed in `docs/`.
+- All generated documents unless otherwise instructed should default to be placed in `docs/` and use standard Markdown format. Ensure each file ends with a newline.

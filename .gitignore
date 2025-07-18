@@ -51,6 +51,10 @@ opencode.md
 
 # Repomix output
 repomix-*.xml
+repomix-output.xml
 
 data-and-logs/
 logs/
+
+# Startup logs
+startup-logs-*

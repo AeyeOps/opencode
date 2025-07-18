@@ -33,6 +33,9 @@ ehthumbs.db
 Thumbs.db
 *.log
 
+# Backup files
+*.bak
+
 # Binary output directory
 /bin/
 /dist/

@@ -449,8 +449,8 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 				}
 			}
 
-			// Tool not found
-			if tool == nil {
+			if tool == nil || !isValidToolName(toolCall.Name, a.tools) {
+				logging.Error("Invalid tool name", "name", toolCall.Name)
 				toolResults[i] = message.ToolResult{
 					ToolCallID: toolCall.ID,
 					Content:    fmt.Sprintf("Tool not found: %s", toolCall.Name),
@@ -458,12 +458,12 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 				}
 				continue
 			}
-			sanitized, parseErr := parseToolInput(toolCall.Input)
-			if parseErr != nil {
-				logging.Error("Param parse error", "error", parseErr, "input", toolCall.Input)
+			sanitizedInput, err := sanitizeToolInput(toolCall.Input)
+			if err != nil {
+				logging.Error("Param parse error", "error", err, "input", toolCall.Input)
 				toolResults[i] = message.ToolResult{
 					ToolCallID: toolCall.ID,
-					Content:    fmt.Sprintf("error parsing parameters: %v", parseErr),
+					Content:    fmt.Sprintf("error parsing parameters: %v", err),
 					IsError:    true,
 				}
 				continue
@@ -471,7 +471,7 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 			toolResult, toolErr := tool.Run(ctx, tools.ToolCall{
 				ID:    toolCall.ID,
 				Name:  toolCall.Name,
-				Input: sanitized,
+				Input: sanitizedInput,
 			})
 			if toolErr != nil {
 				if errors.Is(toolErr, permission.ErrorPermissionDenied) {
@@ -532,25 +532,6 @@ func isValidToolName(name string, tools []tools.BaseTool) bool {
 	return false
 }
 
-func parseToolInput(input string) (string, error) {
-	trimmed := strings.TrimSpace(input)
-	if trimmed == "" {
-		return "{}", nil
-	}
-	var obj any
-	if err := json.Unmarshal([]byte(trimmed), &obj); err == nil {
-		b, _ := json.Marshal(obj)
-		return string(b), nil
-	}
-	trimmed = strings.TrimPrefix(trimmed, "{")
-	trimmed = strings.TrimSuffix(trimmed, "}")
-	candidate := "{" + strings.TrimSpace(trimmed) + "}"
-	if err := json.Unmarshal([]byte(candidate), &obj); err == nil {
-		b, _ := json.Marshal(obj)
-		return string(b), nil
-	}
-	return "", fmt.Errorf("invalid JSON input")
-}
 
 func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg *message.Message, event provider.ProviderEvent) error {
 	select {
@@ -902,4 +883,50 @@ func createAgentProvider(agentName config.AgentName) (provider.Provider, error) 
 	}
 
 	return agentProvider, nil
+}
+
+func isValidToolName(name string, available []tools.BaseTool) bool {
+	for _, t := range available {
+		if t.Info().Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func sanitizeToolInput(input string) (string, error) {
+	trimmed := strings.TrimSpace(input)
+	trimmed = strings.TrimLeft(trimmed, "{")
+	trimmed = strings.TrimRight(trimmed, "}")
+	trimmed = "{" + trimmed + "}"
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(trimmed), &m); err != nil {
+		return "", err
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func parseToolInput(input string) (map[string]interface{}, error) {
+	sanitized, err := sanitizeToolInput(input)
+	if err != nil {
+		return nil, err
+	}
+	var params map[string]interface{}
+	if err := json.Unmarshal([]byte(sanitized), &params); err != nil {
+		return nil, err
+	}
+	return params, nil
+}
+
+func executeTool(ctx context.Context, call tools.ToolCall, available []tools.BaseTool) (tools.ToolResponse, error) {
+	for _, t := range available {
+		if t.Info().Name == call.Name {
+			return t.Run(ctx, call)
+		}
+	}
+	return tools.NewTextErrorResponse("Tool not found"), errors.New("tool not found")
 }

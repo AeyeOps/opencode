@@ -290,10 +290,11 @@ func getDefaultGrok4Prompt() string {
 
 ## TOOL CALLING RULES
 1. **USE EXACT TOOL NAMES** - Do not modify, combine, or repeat tool names
-2. **ONE TOOL PER CALL** - Never combine tools like "sourcegraphview"  
+2. **ONE TOOL PER CALL** - Never combine tools like "sourcegraphview"
 3. **NO REPETITION** - Use "edit" not "editeditedit" or any variation
 4. **VERIFY BEFORE CALLING** - Double-check the tool name matches the list above exactly
-5. **VALID JSON PARAMS** - Tool parameters must be well-formed JSON
+5. **VALID JSON PARAMS** - Parameters must be valid JSON with proper braces and commas
+6. **ASK IF UNSURE** - If you are not certain about the tool name or parameters, ask for clarification instead of calling
 
 ## Common Mistakes to Avoid
 ❌ ` + "`sourcegraphview`" + ` - This tool does not exist. Use ` + "`sourcegraph`" + ` then ` + "`view`" + ` separately

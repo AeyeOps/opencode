@@ -668,6 +668,12 @@ go build -o opencode
 ./opencode
 ```
 
+### Runtime-generated Files
+
+OpenCode creates a SQLite database and supporting log files in the `logs/` directory when it runs.
+Files like `logs/opencode.db`, `logs/opencode.db-shm`, and `logs/opencode.db-wal` are regenerated each
+time the application starts and should not be committed to version control.
+
 ## Acknowledgments
 
 OpenCode gratefully acknowledges the contributions and support from these key individuals:

@@ -27,7 +27,7 @@ OpenCode is a Go-based CLI application that brings AI assistance to your termina
 - **Session Management**: Save and manage multiple conversation sessions
 - **Tool Integration**: AI can execute commands, search files, and modify code
 - **Vim-like Editor**: Integrated editor with text input capabilities
-- **Persistent Storage**: SQLite database for storing conversations and sessions
+- **Persistent Storage**: SQLite database for storing conversations and sessions *(generated at runtime under `logs/`)*
 - **LSP Integration**: Language Server Protocol support for code intelligence
 - **File Change Tracking**: Track and visualize file changes during sessions
 - **External Editor Support**: Open your preferred editor for composing messages

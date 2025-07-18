@@ -48,3 +48,11 @@ opencode.md
 
 # Repomix output
 repomix-output.xml
+
+# Local VS Code workspace
+opencode.code-workspace
+
+# Placeholder files (should not be tracked)
+PR
+fature
+feature

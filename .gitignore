@@ -49,6 +49,14 @@ Thumbs.db
 opencode
 opencode.md
 
+# Workspace settings
+*.code-workspace
+
+# Placeholder files
+PR
+fature
+feature
+
 # Repomix output
 repomix-*.xml
 repomix-output.xml

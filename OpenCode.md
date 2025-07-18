@@ -76,7 +76,7 @@ Untracked files:
   (use "git add <file>..." to include in what will be committed)
 	.claude/
 	OpenCode.md
-	docs-for-grok4-to-review/
+	docs/
 	internal/llm/models/xai2.go
 	internal/llm/provider/xai2.go
 	internal/request/
@@ -108,7 +108,7 @@ b9bedba - Bryan Vaz, 3 weeks ago : feat: add github copilot provider (#230)
           - schema/
             - README.md
             - main.go
-        - docs-for-grok4-to-review/
+        - docs/
           - code-structure.md
           - dynamic-tool-list-update.md
           - grok4-critical-issues.md

@@ -302,7 +302,7 @@ func formatSourcegraphResults(result map[string]any, contextWindow int) (string,
 	}
 
 	// Limit results to a reasonable number
-	maxResults := 10  // With 50 line height limit, we can show more results
+	maxResults := 10 // With 50 line height limit, we can show more results
 	if len(results) > maxResults {
 		results = results[:maxResults]
 		buffer.WriteString(fmt.Sprintf("\n(Showing first %d results of %d total)\n\n", maxResults, len(results)))

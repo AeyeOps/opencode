@@ -88,9 +88,9 @@ func NewProvider(providerName models.ModelProvider, opts ...ProviderClientOption
 	for _, o := range opts {
 		o(&clientOptions)
 	}
-	
+
 	// Log provider creation attempt
-	
+
 	switch providerName {
 	case models.ProviderCopilot:
 		return &baseProvider[CopilotClient]{

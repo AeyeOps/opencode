@@ -27,7 +27,7 @@ const (
 	assistantMessageType
 	toolMessageType
 
-	maxResultHeight = 50  // Increased from 10 to allow more useful tool output
+	maxResultHeight = 50 // Increased from 10 to allow more useful tool output
 )
 
 type uiMessage struct {
@@ -41,7 +41,7 @@ type uiMessage struct {
 func toMarkdown(content string, focused bool, width int) string {
 	r := styles.GetMarkdownRenderer(width)
 	rendered, _ := r.Render(content)
-	
+
 	// Fix HTML entity encoding in code blocks
 	// Glamour escapes & to &amp; which displays literally in the TUI
 	rendered = strings.ReplaceAll(rendered, "&amp;", "&")
@@ -49,7 +49,7 @@ func toMarkdown(content string, focused bool, width int) string {
 	rendered = strings.ReplaceAll(rendered, "&gt;", ">")
 	rendered = strings.ReplaceAll(rendered, "&quot;", "\"")
 	rendered = strings.ReplaceAll(rendered, "&#39;", "'")
-	
+
 	return rendered
 }
 
@@ -490,7 +490,7 @@ func renderToolResponse(toolCall message.ToolCall, response message.ToolResult, 
 		// Results would be truncated - show a truncation indicator
 		// The model still receives the full output up to the tool's limits
 		truncatedMsg := fmt.Sprintf("... Output truncated for display (showing %d of %d lines) ...", maxResultHeight, len(lines))
-		
+
 		// Add the truncation message at the end of the truncated content
 		truncatedLines := lines[:maxResultHeight-1]
 		truncatedLines = append(truncatedLines, truncatedMsg)
@@ -517,16 +517,16 @@ func renderToolResponse(toolCall message.ToolCall, response message.ToolResult, 
 	case tools.FetchToolName:
 		var params tools.FetchParams
 		json.Unmarshal([]byte(toolCall.Input), &params)
-		
+
 		// Limit fetch responses to prevent TUI corruption
 		maxFetchHeight := 30
 		truncatedContent := truncateHeight(resultContent, maxFetchHeight)
-		
+
 		// Add truncation indicator if needed
 		if len(strings.Split(resultContent, "\n")) > maxFetchHeight {
 			truncatedContent += "\n... (truncated)"
 		}
-		
+
 		mdFormat := "markdown"
 		switch params.Format {
 		case "text":

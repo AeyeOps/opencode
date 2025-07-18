@@ -532,7 +532,6 @@ func isValidToolName(name string, tools []tools.BaseTool) bool {
 	return false
 }
 
-
 func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg *message.Message, event provider.ProviderEvent) error {
 	select {
 	case <-ctx.Done():
@@ -883,15 +882,6 @@ func createAgentProvider(agentName config.AgentName) (provider.Provider, error) 
 	}
 
 	return agentProvider, nil
-}
-
-func isValidToolName(name string, available []tools.BaseTool) bool {
-	for _, t := range available {
-		if t.Info().Name == name {
-			return true
-		}
-	}
-	return false
 }
 
 func sanitizeToolInput(input string) (string, error) {

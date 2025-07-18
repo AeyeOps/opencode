@@ -169,7 +169,7 @@ func (g *geminiClient) finishReason(reason genai.FinishReason) message.FinishRea
 func (g *geminiClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error) {
 	// Set current request info for display
 	request.SetCurrent(string(g.providerOptions.model.Provider), g.providerOptions.model.APIModel, "https://generativelanguage.googleapis.com")
-	
+
 	// Convert messages
 	geminiMessages := g.convertMessages(messages)
 
@@ -264,7 +264,7 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 func (g *geminiClient) stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
 	// Set current request info for display
 	request.SetCurrent(string(g.providerOptions.model.Provider), g.providerOptions.model.APIModel, "https://generativelanguage.googleapis.com")
-	
+
 	// Convert messages
 	geminiMessages := g.convertMessages(messages)
 

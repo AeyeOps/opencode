@@ -969,3 +969,4 @@ func LoadGitHubToken() (string, error) {
 
 	return "", fmt.Errorf("GitHub token not found in standard locations")
 }
+
